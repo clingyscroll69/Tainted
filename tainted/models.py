@@ -285,6 +285,17 @@ class MutationSummary(BaseModel):
     note: str = ""
 
 
+class FilteredScope(BaseModel):
+    """One agent scope the model dropped before dynamic proof, and why it said it did.
+
+    `rationale` is the model's own words and comes, indirectly, from the repository under
+    analysis — render it as a quotation, never as Tainted's finding.
+    """
+
+    scope: str
+    rationale: str = ""
+
+
 class AnalysisResult(BaseModel):
     """The output of `analyze`: candidates plus the applicability decisions behind them."""
 
@@ -293,6 +304,16 @@ class AnalysisResult(BaseModel):
     applicability: list[ApplicabilityDecision] = Field(default_factory=list)
     stack: dict[str, Any] = Field(default_factory=dict)  # detected stack facts
     mutation: Optional[MutationSummary] = None
+    # Tool-plane scopes the model filtered out before dynamic proof, with its reason.
+    #
+    # This is the engine's one *membership* decision made by the model: `rank` only orders the
+    # request plane and every candidate is tried regardless, but a `False` here removes a scope
+    # from the run entirely. That drop previously left no trace at all — the report simply
+    # contained fewer scopes, indistinguishable from a repository that had fewer. Recording it
+    # is what lets the report say how far the run reached instead of implying it reached
+    # everything, which is the product's standing rule about proof strength applied to the
+    # filter itself.
+    filtered_scopes: list[FilteredScope] = Field(default_factory=list)
 
     def by_check(self, check: Check) -> list[Candidate]:
         return [c for c in self.candidates if c.check == check]

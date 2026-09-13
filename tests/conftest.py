@@ -48,6 +48,18 @@ class FakeLLM(LLMClient):
             return list(self._keep)[: len(scopes)]
         return [True] * len(scopes)
 
+    def filter_scopes_explained(self, scopes):
+        """The engine calls this one, so the fake has to answer it.
+
+        Kept deliberately thin — it reuses `filter_scopes` above so a test that scripts `keep`
+        still reads the same way, and pairs each decision with a stand-in rationale so the
+        report's "what was dropped" note has something to render.
+        """
+        return [
+            (kept, "" if kept else "fake: judged benign")
+            for kept in self.filter_scopes(scopes)
+        ]
+
     def label_tool(self, tool):
         self.calls.append("label")
         if tool.get("name") in self._label_map:

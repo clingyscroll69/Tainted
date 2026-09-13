@@ -85,8 +85,22 @@ class LLMClient(abc.ABC):
     def filter_scopes(self, scopes: list[dict[str, Any]]) -> list[bool]:
         """Tool plane: keep/drop co-located scopes before expensive dynamic proof.
 
-        Unlike `rank`, a False here removes a candidate from the dynamic queue — the filter's
-        false negatives leave no trace, which is acceptable only because proof is expensive.
+        Unlike `rank`, a False here removes a candidate from the dynamic queue. Prefer
+        `filter_scopes_explained`, which returns the reasons alongside the decisions so a drop
+        can be recorded in the report rather than vanishing.
+        """
+        return [kept for kept, _ in self.filter_scopes_explained(scopes)]
+
+    def filter_scopes_explained(
+        self, scopes: list[dict[str, Any]]
+    ) -> list[tuple[bool, str]]:
+        """`filter_scopes`, with the model's stated reason for each decision.
+
+        The reason matters because this is the engine's only place where the model decides
+        *membership* rather than order. A dropped scope used to leave no trace, so a report
+        listing three scopes looked identical whether the repository had three or the filter
+        had quietly removed a fourth. Tainted's rule is to say how far it reached; that has to
+        apply to its own filter too.
         """
         self._require()
         result = self.complete_json(
@@ -96,9 +110,11 @@ class LLMClient(abc.ABC):
             schema=prompts.SCOPE_FILTER_SCHEMA,
         )
         keep = [bool(k) for k in result.get("keep", [])]
+        reasons = [str(r) for r in (result.get("rationales") or [])]
         if len(keep) < len(scopes):
             keep += [True] * (len(scopes) - len(keep))  # doubt keeps a scope in
-        return keep[: len(scopes)]
+        reasons += [""] * (len(scopes) - len(reasons))
+        return list(zip(keep[: len(scopes)], reasons[: len(scopes)]))
 
     def judge_applicability(self, question: str, evidence: str) -> dict[str, Any]:
         """Applicability rung 2: read code and answer plainly whether a plane exists."""

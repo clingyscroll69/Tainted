@@ -17,6 +17,7 @@ from tainted.models import (
     Candidate,
     Check,
     Confidence,
+    FilteredScope,
     Plane,
     Provenance,
     Register,
@@ -114,14 +115,21 @@ def _scope_candidate(scope: AgentScope) -> Candidate:
 
 
 def analyze_tool_plane(
-    repo_path: str, llm: Optional[LLMClient] = None
+    repo_path: str,
+    llm: Optional[LLMClient] = None,
+    dropped: Optional[list[FilteredScope]] = None,
 ) -> list[Candidate]:
     """Discover scopes, label their tools, find co-located ones, and rank the risky ones.
 
     The LLM labels tools and drops the obviously benign scopes, since dynamic proof is
     expensive to run on every candidate. Without an LLM, every tool stays unlabeled and
     this pass returns nothing rather than guess.
+
+    `dropped`, when given, is filled with the scopes the filter removed and the reason it gave.
+    An out-parameter rather than a second return value so every existing caller and test keeps
+    working unchanged; the orchestrator passes one so the report can account for them.
     """
+    dropped = [] if dropped is None else dropped
     scopes = discover_scopes(repo_path)
     if not scopes or llm is None:
         return []
@@ -133,7 +141,7 @@ def analyze_tool_plane(
 
     # LLM filter: keep only scopes where a real attack looks plausible.
     try:
-        keep = llm.filter_scopes(
+        decisions = llm.filter_scopes_explained(
             [
                 {
                     "scope": s.name,
@@ -144,11 +152,15 @@ def analyze_tool_plane(
             ]
         )
     except LLMUnavailable:
-        keep = [True] * len(colocated)
+        decisions = [(True, "") for _ in colocated]
 
     candidates = []
-    for scope, kept in zip(colocated, keep):
+    for scope, (kept, rationale) in zip(colocated, decisions):
         if not kept:
+            # Recorded, not discarded. This is the engine's only model-made membership
+            # decision, and the report has to be able to say a scope was dropped rather than
+            # look the same as a repository that never had it.
+            dropped.append(FilteredScope(scope=scope.name, rationale=rationale))
             continue
         cand = _scope_candidate(scope)
         cand.filtered_in = True

@@ -156,6 +156,27 @@ def _coverage(analysis: AnalysisResult, findings: list[Finding]) -> list[Coverag
             proved = False
         notes.append(CoverageNote(check=check, proved=proved, detail=detail))
 
+    # The model's one membership decision, said out loud. A scope it filtered out was never
+    # tried and never appears as a candidate, so without this the report of a repository whose
+    # fourth scope was dropped reads exactly like the report of a repository with three. That
+    # is the same silence the coverage column exists to break.
+    filtered_scopes = analysis.filtered_scopes
+    if filtered_scopes:
+        names = ", ".join(f"`{s.scope}`" for s in filtered_scopes)
+        notes.append(
+            CoverageNote(
+                check=Check.AGENT_INJECTION,
+                proved=False,
+                detail=(
+                    f"{len(filtered_scopes)} agent scope(s) were filtered out before dynamic "
+                    f"proof and never attempted: {names}. The model judged a confused-deputy "
+                    f"attack implausible there. Dynamic proof is expensive, so this filter "
+                    f"exists — but a drop is a judgement, not a result, and these were not "
+                    f"shown to be safe."
+                ),
+            )
+        )
+
     coded = [
         f
         for f in findings

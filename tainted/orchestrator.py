@@ -31,6 +31,7 @@ from tainted.models import (
     ApplicabilityDecision,
     Candidate,
     Check,
+    FilteredScope,
     Finding,
     FindingStatus,
     FixResult,
@@ -100,8 +101,13 @@ def analyze(
         Plane.TOOL, repo_path, llm=llm, target=target, behavioral_probe=behavioral_probe
     )
     decisions.append(tool_decision)
+    # What the model filtered out travels with the result, so the report can say a scope was
+    # dropped rather than look identical to a repository that never had one.
+    filtered_scopes: list[FilteredScope] = []
     if tool_decision.applies and Check.AGENT_INJECTION in active:
-        candidates.extend(analyze_tool_plane(repo_path, llm=llm))
+        candidates.extend(
+            analyze_tool_plane(repo_path, llm=llm, dropped=filtered_scopes)
+        )
 
     # Test integrity — a codebase-level measurement, not a plane, so no applicability gate.
     # It is opt-in by cost, not by relevance: a mutation campaign is minutes, not milliseconds.
@@ -117,6 +123,7 @@ def analyze(
         candidates=candidates,
         applicability=decisions,
         mutation=mutation,
+        filtered_scopes=filtered_scopes,
     )
 
 
