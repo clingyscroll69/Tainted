@@ -39,7 +39,7 @@ folder and runs those two installs.
 | `cli/` | Local developer loop (Typer) | `analyze`, `watch`, interactive `fix`, pre-commit gate | developer machine |
 | `ci/` | CI — where proof happens | `analyze` + `prove` + `fix`-as-PR | GitHub Actions / GitLab CI |
 | `mcp/` | The agent (MCP) | sync `analyze` tools, async `prove` job, interactive `fix` | stdio / SSE MCP server |
-| `website/` | The demonstration (FastAPI) | `analyze` + `prove` (sandboxed) + patch download | container / Cloudflare |
+| `website/` | The demonstration (FastAPI) | `analyze` + `prove` + patch download | long-lived container |
 
 Only **CI** reliably has a running app to attack, so it's the surface where
 `prove` runs by default. The **CLI** and **website** work fine with no target: the CLI

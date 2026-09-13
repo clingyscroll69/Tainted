@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import queue
 import re
@@ -234,6 +235,12 @@ def auth_status(request: Request):
         "authenticated": session is not None,
         "login": session.login if session else None,
         "reason": _sign_in_unavailable_reason(),
+        # Whether a filesystem path is a usable way to name a repository here. It is the dev
+        # fallback, refused by any deployment that is not the developer's own machine — and a
+        # page that renders the field anyway is offering the one input the server will refuse.
+        # With sign-in unconfigured *and* this false, the demo is all this deployment can do,
+        # and saying so is better than a form that 403s.
+        "local_paths": _local_mode(),
     }
 
 
@@ -755,6 +762,76 @@ def api_fix(req: FixRequest, request: Request):
     payload = fix_result.model_dump(mode="json")
     payload["loop_closed"] = False
     return JSONResponse(payload)
+
+
+# --------------------------------------------------------------------------- #
+# What this deployment cannot do, said at startup
+#
+# Every switch here already fails closed on its own, which is right — but each failure arrives
+# separately, at the moment a visitor trips over it, phrased for that one request. A deployment
+# missing `TAINTED_TOKEN_SECRET` looks fine until someone tries to sign in; one missing the
+# OAuth pair looks fine until someone tries to name a repository. The operator is the person
+# who can fix either, and they are not watching that request.
+#
+# So: one statement, once, at import, listing what is missing and what it costs. It does not
+# refuse to start — a demo-only deployment is a legitimate thing to run, and crashing on a
+# missing optional key would make it impossible.
+# --------------------------------------------------------------------------- #
+def deployment_warnings() -> list[str]:
+    """Every configuration gap that narrows what this process can do, in plain terms."""
+    out: list[str] = []
+    if _local_mode():
+        return out  # a developer's own machine; none of the below is expected there
+
+    if not keys.configured():
+        out.append(
+            f"{keys.SECRET_ENV} is not set. GitHub sign-in and ownership tokens are both "
+            "unavailable, so this deployment can only run the demo. Generate one with: "
+            'python -c "import secrets; print(secrets.token_urlsafe(48))" — and use the same '
+            "value on every instance."
+        )
+    if not _oauth.configured:
+        out.append(
+            "GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET are not set. Nobody can sign in, and "
+            "without sign-in there is no way to name a repository: filesystem paths are "
+            "refused off a developer's own machine. The demo still works."
+        )
+    elif not _oauth.redirect_override:
+        out.append(
+            "GITHUB_OAUTH_REDIRECT is not set. Behind a proxy the callback URL is derived "
+            "from the request and will not match the one registered with GitHub; sign-in "
+            "will fail with an opaque error. Set it to "
+            "https://<your-host>/api/auth/github/callback."
+        )
+    if require_sandbox() and not getattr(_executor, "sandboxed", False):
+        out.append(
+            "TAINTED_REQUIRE_SANDBOX is set but no sandbox is configured "
+            "(TAINTED_SANDBOX_URL / TAINTED_SANDBOX_TOKEN). Every `prove` will be refused."
+        )
+    elif not require_sandbox() and not getattr(_executor, "sandboxed", False):
+        out.append(
+            "`prove` will execute untrusted exploits in this process: no sandbox is "
+            "configured and TAINTED_REQUIRE_SANDBOX is not set. Set it to fail closed."
+        )
+    if not _env_flag("TAINTED_CSP_ENFORCE"):
+        out.append(
+            "TAINTED_CSP_ENFORCE is not set, so the Content-Security-Policy is sent "
+            "report-only and nothing is actually blocked."
+        )
+    return out
+
+
+def _announce_deployment() -> None:
+    warnings = deployment_warnings()
+    if not warnings:
+        return
+    log = logging.getLogger("tainted.website")
+    log.warning("Tainted is starting with %d configuration gap(s):", len(warnings))
+    for i, w in enumerate(warnings, 1):
+        log.warning("  %d. %s", i, w)
+
+
+_announce_deployment()
 
 
 @app.get("/healthz")

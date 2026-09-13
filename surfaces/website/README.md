@@ -34,6 +34,14 @@ hands you the patch and you apply it yourself.
 
 ## Deploy
 
+**This surface needs a long-lived container, not a serverless function.** A `prove` holds a
+worker thread for up to `TAINTED_PROVE_TIMEOUT_S` (900 s by default) while it streams progress;
+the concurrency ceiling is a per-process semaphore; and a fetched repository may expand to
+`TAINTED_MAX_EXTRACTED_MB` (1024 by default) of writable temp space. Those three assumptions
+are what the Dockerfile below is for. On a platform with a short function timeout or a small
+`/tmp`, `analyze` will work and `prove` will not — lower the two limits and expect the rest to
+need re-architecting into a queued job.
+
 From a repo that has the core (`tainted/`, root `pyproject.toml`) plus this folder:
 
 ```bash

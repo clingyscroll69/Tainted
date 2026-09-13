@@ -490,6 +490,16 @@ h1,h2,h3,p{margin:0}
   padding:11px 14px;margin-bottom:16px;font-size:0.8125rem;line-height:1.55;color:var(--snow);
   max-width:62ch}
 .demobar b{color:var(--held)}
+/* Said in the page's own register: a plain statement of what this deployment is, on the cold
+   `--rule` border the other informational panels use. Not `--held` (that colour means a
+   proof strength) and not an alert — nothing has gone wrong, there is simply less here. */
+.demo-only{border:1px solid var(--rule);border-radius:3px;background:var(--lift);
+  padding:12px 14px;font-size:0.8125rem;line-height:1.55;color:var(--wash);
+  display:flex;flex-direction:column;gap:8px}
+.demo-only p{margin:0}
+.demo-only b{color:var(--snow)}
+.demo-only code{font-family:var(--ff-data);font-size:0.72rem;color:var(--wash-dim);
+  word-break:break-word}
 .demo-load{width:100%;justify-content:center;margin-top:-2px}
 .demo-load code{font-family:var(--ff-data);font-size:0.75rem}
 
@@ -2711,9 +2721,14 @@ html.is-diving,html.is-diving body{overflow:hidden}
           <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-lamp"/></svg>
           <span id="armlabel">Arm &amp; prove</span>
         </button>
+        <!-- The at-rest text, before any script runs, and therefore also the no-JS text. It
+             used to name `localhost:54321` — the *placeholder* from the target field, not a
+             value anyone had entered — on the one control that fires real attacks. The live
+             note is bound to the actual target (see `say()` in refreshArm), so this only ever
+             showed for the moment before hydration; it now says what that logic says first. -->
         <span class="armnote" id="armnote" role="status">
-          Runs real exploits against <span class="dat">localhost:54321</span>. Off localhost, it
-          stays off until ownership is verified.
+          Analyze a repository first. Proving is something Tainted does <em>to</em> a
+          candidate, so there has to be one.
         </span>
       </div>
 
@@ -2817,27 +2832,42 @@ html.is-diving,html.is-diving body{overflow:hidden}
                 <button class="linkbtn" id="ghlogout" type="button">Sign out</button></p>
               <label>Repository<select id="f-gh-repo"><option value="">Loading your repositories…</option></select></label>
             </div>
-            <p class="gh-or"><span>or give a local path</span></p>
+            <p class="gh-or" id="gh-or"><span>or give a local path</span></p>
           </div>
-          <label>Repository path<input id="f-repo" placeholder="/path/to/your/app"
+          <!-- The dev fallback. A hosted deployment refuses a filesystem path outright, so it
+               is removed there rather than rendered and 403'd: offering an input the server
+               will not accept is worse than not offering one. `hidden` is set by
+               `applyDeploymentShape()` from /api/auth/status, never guessed from the URL. -->
+          <label id="repowrap">Repository path<input id="f-repo" placeholder="/path/to/your/app"
                  aria-describedby="formerr"></label>
           <p class="formerr" id="formerr" role="alert"></p>
+          <!-- Shown only when this deployment can do nothing but the demo: no GitHub sign-in
+               configured and no local paths accepted. It states the situation instead of
+               letting the reader discover it by being refused. -->
+          <div class="demo-only" id="demoonly" hidden>
+            <p><b>This deployment runs the demonstration only.</b> It has no GitHub sign-in
+              configured, and it does not accept filesystem paths — those belong to a Tainted
+              running on your own machine.</p>
+            <p class="formnote">To scan your own code: run Tainted locally, or ask whoever
+              deployed this to set <code>GITHUB_CLIENT_ID</code>,
+              <code>GITHUB_CLIENT_SECRET</code> and <code>TAINTED_TOKEN_SECRET</code>.</p>
+          </div>
           <button class="mini demo-load" id="loaddemo" type="button">Try it with <code>demo/demo</code></button>
           <button class="btn wide" id="scan" type="submit">
             <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-struct"/></svg>Analyze
           </button>
-          <p class="formnote">
+          <p class="formnote" data-needs-repo>
             Static and read-only. The fields below are only needed to <em>prove</em> a hole is
             real.
           </p>
-          <label>Target URL<input id="f-url" placeholder="http://localhost:54321"></label>
+          <label data-needs-repo>Target URL<input id="f-url" placeholder="http://localhost:54321"></label>
           <!-- Two fields per account, and the password is the one that is masked. These are
                real credentials for the reader's own running app; the anon key below them is a
                value their browser already ships to anyone who loads the page. Masking the
                public one and leaving the private ones in plain text had it backwards. A
                single `email:password` field also could not be filled by a password manager
                and silently made the colon un-typeable in an address. -->
-          <div class="acct">
+          <div class="acct" data-needs-repo>
             <label for="f-a-email">Account A</label>
             <input id="f-a-email" autocomplete="off" spellcheck="false" autocapitalize="off"
                    placeholder="a@example.com" aria-describedby="acctnote">
@@ -2856,7 +2886,7 @@ html.is-diving,html.is-diving body{overflow:hidden}
                       aria-controls="f-a-pass">Show</button>
             </span>
           </div>
-          <div class="acct">
+          <div class="acct" data-needs-repo>
             <label for="f-b-email">Account B</label>
             <input id="f-b-email" autocomplete="off" spellcheck="false" autocapitalize="off"
                    placeholder="b@example.com" aria-describedby="acctnote">
@@ -2867,19 +2897,19 @@ html.is-diving,html.is-diving body{overflow:hidden}
                       aria-controls="f-b-pass">Show</button>
             </span>
           </div>
-          <p class="formnote" id="acctnote">
+          <p class="formnote" id="acctnote" data-needs-repo>
             Tainted signs in as both, then asks for A&rsquo;s record as B. Sent with this run
             and used to log in; not written to disk by the engine.
           </p>
-          <label>Seed record<input id="f-seed" placeholder="invoices:1043"></label>
+          <label data-needs-repo>Seed record<input id="f-seed" placeholder="invoices:1043"></label>
           <!-- The reveal button sits beside the label, not inside it. A `label` can't hold
                interactive content — when it did, the input's accessible name became
                "Anon key Show". -->
           <!-- Not masked, and not a secret: the Supabase anon key is the public value the
                browser sends with every request. Presenting it as a password taught the
                opposite, and blocked password managers on a field that never wanted one. -->
-          <label for="f-key">Anon key</label>
-          <input id="f-key" autocomplete="off" spellcheck="false"
+          <label for="f-key" data-needs-repo>Anon key</label>
+          <input id="f-key" data-needs-repo autocomplete="off" spellcheck="false"
                  placeholder="(Supabase anon key &mdash; public, optional)">
           <!-- Off localhost, this field is the whole ownership gate. It only shows for remote
                targets, since localhost needs no proof. -->
@@ -6968,10 +6998,42 @@ html.is-diving,html.is-diving body{overflow:hidden}
   const ghPick  = document.getElementById('f-gh-repo');
   const ghLogin = document.getElementById('ghlogin');
 
+  /* What this deployment can actually be asked to do.
+
+     Three shapes, and the form has to match the one it is in rather than render every control
+     and let the server refuse:
+
+       local dev      — sign-in optional, filesystem paths accepted
+       hosted + OAuth — sign in and pick a repository; no paths
+       hosted, no OAuth — the demo, and nothing else
+
+     The third was the broken one: the page hid the sign-in box it could not use, left the
+     path field as the only visible input, and answered a submission with "Sign in with GitHub
+     and pick a repository" — naming a control that was not on the page. */
+  function applyDeploymentShape(st){
+    const canPath = !!st.local_paths;
+    const canGitHub = !!st.configured;
+    document.getElementById('repowrap').hidden = !canPath;
+    document.getElementById('demoonly').hidden = canPath || canGitHub;
+    /* "or give a local path" is only a real alternative where paths are accepted. */
+    const or = document.getElementById('gh-or');
+    if(or) or.hidden = !canPath;
+    /* With no repository input of any kind, Analyze has nothing to act on except the demo.
+       The demo button stays, because it is the one thing that does work. */
+    const usable = canPath || canGitHub;
+    document.getElementById('scan').hidden = !usable;
+    /* The prove fields are downstream of a repository: they describe the running app whose
+       candidates a run will attack. With no way to name a repository here, they are seven
+       inputs — two of them credentials for someone else's app — that nothing can act on. The
+       same rule applies to them as to the path field. */
+    document.querySelectorAll('[data-needs-repo]').forEach(el => { el.hidden = !usable; });
+  }
+
   async function refreshAuth(){
     let st;
     try { st = await (await fetch('/api/auth/status')).json(); }
-    catch(e){ return; }                       // no answer from the backend: stay on the path field
+    catch(e){ return; }                       // no answer from the backend: leave the form as-is
+    applyDeploymentShape(st);
     if(!st.configured){ ghBox.hidden = true; return; }
     ghBox.hidden = false;
     ghLogin.hidden = !!st.authenticated;
