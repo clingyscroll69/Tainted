@@ -1,0 +1,64 @@
+# Every surface is independently deployable, so every surface is independently tested:
+# four suites, four PYTHONPATHs, one job. They are hermetic — no key, no network, no
+# browser — so there is nothing to configure here and nothing to skip.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # `dev-all` is the extra that makes the four commands below runnable. Installing the
+      # core alone is what let two of them sit broken without anyone being told.
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev-all]"
+          pip install -e surfaces/cli -e surfaces/ci -e surfaces/mcp -e surfaces/website
+
+      - name: Engine
+        run: PYTHONPATH=. pytest tests/ -q
+
+      - name: CLI surface
+        run: PYTHONPATH=.:surfaces/cli pytest surfaces/cli/tests -q
+
+      - name: CI surface
+        run: PYTHONPATH=.:surfaces/ci pytest surfaces/ci/tests -q
+
+      - name: MCP surface
+        run: PYTHONPATH=.:surfaces/mcp pytest surfaces/mcp/tests -q
+
+      - name: Website surface
+        run: PYTHONPATH=.:surfaces/website pytest surfaces/website/tests -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev-all]"
+          pip install -e surfaces/cli -e surfaces/ci -e surfaces/mcp -e surfaces/website
+      - name: Ruff
+        run: ruff check .
+      - name: Mypy
+        run: mypy tainted

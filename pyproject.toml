@@ -39,12 +39,20 @@ oidc = ["pyjwt[crypto]>=2.8"]
 dns = ["dnspython>=2.4"]
 # Third-party validation of the injection generator (not of the detector).
 bench = ["agentdojo>=0.1"]
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+dev = ["pytest>=8.0"]
 all = [
     "playwright>=1.40",
     "semgrep>=1.50",
     "pyjwt[crypto]>=2.8",
     "dnspython>=2.4",
+]
+# Everything needed to run the four test suites and the linters in one install. The README's
+# Tests section lists four commands; installing only `dev` leaves two of them failing at
+# collection on a dependency the reader was never told to install.
+dev-all = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
 ]
 
 [tool.setuptools.packages.find]
@@ -55,5 +63,8 @@ include = ["tainted*"]
 "tainted.static" = ["rules/*.yaml"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"
+# No `asyncio_mode` here. It is a pytest-asyncio option, the suite contains no `async def`
+# tests, and the plugin was not installed — so the key did nothing except emit a
+# PytestConfigWarning on every run, which is exactly the noise that hides a real warning.
+# Restore both together if an async test is ever added.
 testpaths = ["tests"]

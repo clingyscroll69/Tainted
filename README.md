@@ -61,6 +61,16 @@ playwright install chromium      # only if you want traffic discovery
 cp .env.example .env             # then fill in GEMINI_API_KEY
 ```
 
+To run **every** suite, including the surfaces, install the surface packages too. Each surface
+has its own dependencies (Typer, the MCP SDK, FastAPI), and the core install does not pull
+them — without this step the CLI and MCP suites below fail at collection:
+
+```bash
+pip install -e ".[dev-all]"                      # core + pytest + ruff + mypy
+pip install -e surfaces/cli -e surfaces/ci \
+            -e surfaces/mcp -e surfaces/website  # the four surfaces
+```
+
 Tainted reads the Gemini key from the `GEMINI_API_KEY` environment variable or `.env`.
 It is never hardcoded. Without it, static analysis still runs in full; only the
 meaning register is missing, and the report says so instead of hiding it.
@@ -81,3 +91,6 @@ PYTHONPATH=.:surfaces/website pytest surfaces/website/tests
 Every test is hermetic: the LLM, the HTTP transport, the mutation runner, Semgrep and
 the agent driver are all fakeable. The suite needs no API key, no network, and no
 browser.
+
+All four run on every push — see `.github/workflows/test.yml`, which installs exactly the
+two lines from Setup above, so a command that works in CI works on your machine.
