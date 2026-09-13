@@ -626,14 +626,39 @@ def demo_prove_report(sleep=time.sleep) -> Report:
     return demo_prove_stream(sleep=sleep)
 
 
-def demo_fix_result(index: int = 0, sleep=time.sleep) -> FixResult:
-    """`fix`: the remediation for one demo candidate, patch-only as on any website."""
+def demo_published_order(analysis: AnalysisResult) -> list[Candidate]:
+    """The demo's candidates in the order its report publishes them.
+
+    The demo has to honour the same addressing contract as a real run, or the one journey open
+    to everyone teaches the wrong thing about how the page works.
+    """
+    report = demo_analyze_report(sleep=lambda _s: None)
+    by_id = {c.id: c for c in analysis.candidates}
+    ordered = [by_id[f.candidate.id] for f in report.findings if f.candidate.id in by_id]
+    ordered += [by_id[c.id] for c in report.unproven_candidates if c.id in by_id]
+    return ordered
+
+
+def demo_fix_result(
+    index: int = 0, sleep=time.sleep, *, finding_id: Optional[str] = None
+) -> FixResult:
+    """`fix`: the remediation for one demo candidate, patch-only as on any website.
+
+    Resolved by id where one is given, exactly as the real path is — the demo used to index
+    `ranked()` while its report published a different order, which is the same defect the real
+    endpoint had.
+    """
     _pause(FIX_SECONDS, sleep)
     analysis = demo_analysis()
-    candidates = analysis.ranked()
-    if index >= len(candidates):
-        index = 0
-    candidate = candidates[index]
+    if finding_id:
+        candidate = next((c for c in analysis.candidates if c.id == finding_id), None)
+        if candidate is None:
+            raise KeyError(finding_id)
+    else:
+        candidates = demo_published_order(analysis)
+        if index >= len(candidates):
+            index = 0
+        candidate = candidates[index]
     edits, notes = _demo_edit(candidate)
     return FixResult(
         finding=Finding(candidate=candidate),

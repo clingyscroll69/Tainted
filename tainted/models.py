@@ -8,10 +8,11 @@ skip on an unusual stack is legible and overridable rather than silent.
 
 from __future__ import annotations
 
+import hashlib
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 # --------------------------------------------------------------------------- #
@@ -127,6 +128,40 @@ class Candidate(BaseModel):
     provenance: list[Provenance] = Field(default_factory=list)
     confidence: Optional[Confidence] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def id(self) -> str:
+        """A stable handle for this hole, derived from where it is rather than when it was found.
+
+        A surface has to be able to say "fix *that* one" across a request boundary, and the
+        obvious handle — the position in a list — is wrong in a way that is easy to miss: the
+        report publishes candidates in discovery order while `ranked()` sorts them by
+        structural-first, then model score, then severity. Two orders of one set. Addressing by
+        position meant a reader clicking the second row could be handed the patch for a
+        different hole entirely, and with the model enabled `rank_score` is not even stable
+        between two analyses of the same tree.
+
+        So the handle is computed from the hole's own coordinates: which check found it, the
+        file and line it sits on, and the dangerous place it reaches. Deliberately excluded are
+        `rank_score`, `filtered_in`, `severity` and `description` — every field a second run or
+        a model call could move. Two analyses of an unchanged tree therefore agree, which is
+        the property `test_fix_identity` pins.
+
+        Not a security boundary: it identifies a finding, it does not authorise anything. The
+        16 hex characters are for a URL fragment and a log line, not for unguessability.
+        """
+        seed = "\x1f".join(
+            (
+                self.check.value,
+                self.plane.value if self.plane else "",
+                self.location.file,
+                str(self.location.line),
+                self.sink,
+                self.title,
+            )
+        )
+        return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
     def __str__(self) -> str:
         return f"[{self.check.value}] {self.title} ({self.location})"

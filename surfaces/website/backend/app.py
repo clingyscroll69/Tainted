@@ -7,6 +7,7 @@ import os
 import queue
 import secrets
 import threading
+from collections import OrderedDict
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Callable, Iterator, Optional
@@ -22,14 +23,14 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from tainted import analyze as core_analyze
 from tainted import fix as core_fix
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
 from tainted.fix import InterviewAnswer, tool_plane_interview
 from tainted.llm.gemini import get_default_client
-from tainted.models import Check, Finding
+from tainted.models import AnalysisResult, Candidate, Finding
 from tainted.ownership import WELL_KNOWN_PATH, verify
 from tainted.report import build_report
 from backend import demo as demo_mode
@@ -151,7 +152,13 @@ class FixRequest(BaseModel):
     repo_path: Optional[str] = None
     repo: Optional[str] = None
     ref: Optional[str] = None
-    index: int = 0
+    # Which hole to fix. `finding_id` is the handle a client should send: it names the hole
+    # itself, so it cannot drift. `index` is the older positional form, kept working for one
+    # release — it now addresses the order the *report* published, which is what the browser
+    # drew, rather than a second run's ranking. `ge=0` because a negative index used to be
+    # accepted and wrapped, silently handing back the last candidate's patch.
+    finding_id: Optional[str] = None
+    index: int = Field(0, ge=0)
     # Tool-plane fixes are architecturally underdetermined; these are the interview's answers.
     answers: Optional[dict[str, str]] = None
 
@@ -565,6 +572,82 @@ def api_prove(req: ProveRequest, request: Request):
             _prove_slots.release()
 
 
+# --------------------------------------------------------------------------- #
+# Naming one hole out of many
+#
+# A fix request has to say *which* hole across a request boundary. It used to say it by
+# position, and position was wrong: `build_report` publishes candidates in discovery order,
+# `AnalysisResult.ranked()` sorts them structural-first then by model score — two orders of one
+# set — so the row a reader clicked and the candidate the endpoint fixed were different
+# candidates whenever those orders disagreed. With the model enabled `rank_score` is not even
+# stable between two runs, so the mismatch was unbounded.
+#
+# `Candidate.id` is the handle that replaces it. The positional form stays accepted for one
+# release so an un-updated client keeps working, but it now indexes the order the report
+# actually published — the same list the browser drew.
+# --------------------------------------------------------------------------- #
+def _published_order(result) -> list[Candidate]:
+    """The candidates in the order a surface was shown them.
+
+    `build_report` lists carried findings first, then everything untried, and the frontend
+    concatenates the two in that order. Anything addressing "the nth row" has to mean this
+    list and no other.
+    """
+    report = build_report(result)
+    return [f.candidate for f in report.findings] + list(report.unproven_candidates)
+
+
+def _select_candidate(result, finding_id: Optional[str], index: int) -> Candidate:
+    if finding_id:
+        for cand in result.candidates:
+            if cand.id == finding_id:
+                return cand
+        raise HTTPException(
+            400,
+            f"no finding with id {finding_id} in this repository. Re-run the analysis — "
+            "the code may have changed since that report was drawn.",
+        )
+    published = _published_order(result)
+    if index >= len(published):
+        raise HTTPException(400, f"no candidate at index {index}")
+    return published[index]
+
+
+# Bounded, so a long-lived process cannot accumulate results for checkouts that are long gone.
+# Small on purpose: this is a within-request convenience, not a durable store.
+_ANALYSIS_CACHE: "OrderedDict[str, AnalysisResult]" = OrderedDict()
+_ANALYSIS_CACHE_MAX = 32
+_ANALYSIS_LOCK = threading.Lock()
+
+
+def _analysis_for(repo_path: str, llm) -> AnalysisResult:
+    """One analysis per checkout, not one per click.
+
+    `fix` re-ran the whole static pass — re-parsing the tree and re-calling the model to rank
+    it — every time a reader asked for a patch, for data the server had computed moments
+    earlier. On a large repo that is seconds and an API call per click.
+
+    Keyed on the checkout path, which is unique per request (`tempfile.mkdtemp`) and removed
+    after it, so an entry can never outlive the tree it describes or be returned for a
+    different one. A local `repo_path` in dev is stable and may be edited between calls, which
+    is why entries are evicted rather than kept indefinitely.
+    """
+    with _ANALYSIS_LOCK:
+        cached = _ANALYSIS_CACHE.get(repo_path)
+        if cached is not None:
+            _ANALYSIS_CACHE.move_to_end(repo_path)
+            return cached
+
+    result = core_analyze(repo_path, llm=llm)
+
+    with _ANALYSIS_LOCK:
+        _ANALYSIS_CACHE[repo_path] = result
+        _ANALYSIS_CACHE.move_to_end(repo_path)
+        while len(_ANALYSIS_CACHE) > _ANALYSIS_CACHE_MAX:
+            _ANALYSIS_CACHE.popitem(last=False)
+    return result
+
+
 @app.post("/api/fix")
 def api_fix(req: FixRequest, request: Request):
     """Website degrades to patch-generation: it hands back the diff; the developer applies it.
@@ -574,17 +657,18 @@ def api_fix(req: FixRequest, request: Request):
     not a missing feature, and the response says so rather than implying a fix was verified.
     """
     if demo_mode.is_demo(req.repo_path, req.repo):
-        payload = demo_mode.demo_fix_result(req.index).model_dump(mode="json")
+        try:
+            result = demo_mode.demo_fix_result(req.index, finding_id=req.finding_id)
+        except KeyError:
+            raise HTTPException(400, f"no finding with id {req.finding_id} in the demo run.")
+        payload = result.model_dump(mode="json")
         payload["loop_closed"] = False
         return JSONResponse(payload)
 
     with _checkout(req, request) as repo_path:
         llm = _llm_or_none()
-        result = core_analyze(repo_path, llm=llm)
-        candidates = result.ranked()
-        if req.index >= len(candidates):
-            raise HTTPException(400, f"no candidate at index {req.index}")
-        cand = candidates[req.index]
+        result = _analysis_for(repo_path, llm)
+        cand = _select_candidate(result, req.finding_id, req.index)
 
         answers = (
             [InterviewAnswer(key=k, choice=v) for k, v in req.answers.items()]

@@ -4441,6 +4441,11 @@ html.is-diving,html.is-diving body{overflow:hidden}
     el.dataset.check = c.check || '';
     el.dataset.src = c.source || c.check;
     el.dataset.sink = c.sink || '(sink)';
+    /* The engine's own handle for this hole. "Write the fix" sends this rather than the row's
+       position: the report publishes candidates in one order and the engine ranks them in
+       another, so a position meant the reader could be handed a patch for a different
+       finding. The id names the hole itself. */
+    el.dataset.fid = c.id || '';
     if(c.metadata && c.metadata.route_path){
       el.dataset.mid = (c.metadata.method || 'GET') + ' ' + c.metadata.route_path;
       el.dataset.midD = Math.round(depth / 2);
@@ -7400,12 +7405,17 @@ html.is-diving,html.is-diving body{overflow:hidden}
        Running"). */
     if(btn.dataset.busy === '1') return;
     const article = btn.closest('.find');
-    const index = finds.indexOf(article);
+    /* Address the hole, not the row. `index` rides along only so an older backend that does
+       not know `finding_id` still answers; a current one ignores it. */
+    const body = Object.assign(repoSelection(), {
+      finding_id: article.dataset.fid || undefined,
+      index: Math.max(0, finds.indexOf(article))
+    });
     btn.dataset.busy = '1';
     btn.classList.add('running');
     btn.setAttribute('aria-busy', 'true');
     try {
-      const fix = await call('/api/fix', Object.assign(repoSelection(), {index}));
+      const fix = await call('/api/fix', body);
       const box = document.createElement('div');
       /* A patch is a recommendation, not evidence, so it gets the dashed frame instead of
          the proof block's solid one. Added and removed lines are colored, since a diff read

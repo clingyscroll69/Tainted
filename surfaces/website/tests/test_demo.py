@@ -183,8 +183,19 @@ def test_proven_findings_carry_a_request_and_a_response():
 # --------------------------------------------------------------------------- #
 # Fix
 # --------------------------------------------------------------------------- #
+def _demo_id(check: Check) -> str:
+    """The demo candidate for one check, named by id rather than by position.
+
+    A position is not a name: the report publishes candidates in one order and `ranked()`
+    sorts them into another, so "the first one" means two different holes depending on which
+    list is being counted. These tests ask for a specific check.
+    """
+    analysis = demo_mode.demo_analysis()
+    return next(c.id for c in analysis.candidates if c.check is check)
+
+
 def test_demo_fix_returns_a_real_migration_for_an_rls_finding():
-    result = demo_mode.demo_fix_result(0, sleep=_noop)
+    result = demo_mode.demo_fix_result(sleep=_noop, finding_id=_demo_id(Check.RLS))
     body = "\n".join(e.replacement for e in result.edits)
     assert "enable row level security" in body
     assert "auth.uid()" in body
@@ -193,13 +204,20 @@ def test_demo_fix_returns_a_real_migration_for_an_rls_finding():
 
 def test_demo_fix_declines_to_write_the_tool_plane_fix():
     """The interview exists because the code cannot answer; the demo must show that, not skip it."""
-    analysis = demo_mode.demo_analysis()
-    index = next(
-        i for i, c in enumerate(analysis.ranked()) if c.check is Check.AGENT_INJECTION
+    result = demo_mode.demo_fix_result(
+        sleep=_noop, finding_id=_demo_id(Check.AGENT_INJECTION)
     )
-    result = demo_mode.demo_fix_result(index, sleep=_noop)
     assert result.edits == []
     assert "underdetermined" in result.notes
+
+
+def test_demo_fix_by_position_follows_the_published_order():
+    """The positional form still works, and now means the order the page actually drew."""
+    report = demo_mode.demo_analyze_report(sleep=_noop)
+    published = list(report.unproven_candidates)
+    for i, cand in enumerate(published):
+        result = demo_mode.demo_fix_result(i, sleep=_noop)
+        assert result.finding.candidate.id == cand.id
 
 
 def test_demo_fix_endpoint_says_the_loop_did_not_close():
