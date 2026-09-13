@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 
 from tainted import fix as core_fix
-from tainted.checks.test_integrity import CommandResult
 from tainted.fix.interview import (
     InterviewAnswer,
     ToolRemediation,

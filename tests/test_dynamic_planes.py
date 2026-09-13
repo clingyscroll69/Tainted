@@ -9,7 +9,6 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from tainted.checks.tool_plane import _scope_candidate
 from tainted.dynamic.agent_driver import AgentDriverError, LLMAgentDriver, build_driver
 from tainted.dynamic.discovery import CapturedRequest, extract_references
 from tainted.dynamic.injection_probes import prove_sql_injection
@@ -22,7 +21,6 @@ from tainted.models import (
     Plane,
     SourceLocation,
 )
-from tainted.static.tools import AgentScope, ToolSpec
 
 SEED_ID = "11111111-1111-1111-1111-111111111111"
 

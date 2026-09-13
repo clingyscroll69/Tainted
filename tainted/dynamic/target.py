@@ -14,7 +14,7 @@ import socket
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class Account(BaseModel):

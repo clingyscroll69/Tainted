@@ -9,7 +9,6 @@ progress an executor cannot observe, and it may not re-order the run to suit a p
 from __future__ import annotations
 
 import json
-import os
 
 import httpx
 import pytest

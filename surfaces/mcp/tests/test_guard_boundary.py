@@ -15,7 +15,7 @@ import httpx
 import pytest
 
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
-from tainted.selfdefense import AllowedCall, PlanViolation, ProbePlan
+from tainted.selfdefense import AllowedCall, PlanViolation
 from tainted_mcp.guard import (
     build_probe_plan,
     commit_plan,

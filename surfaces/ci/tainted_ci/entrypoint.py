@@ -23,14 +23,13 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 
 from tainted import analyze as core_analyze
 from tainted import prove as core_prove
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
 from tainted.llm.gemini import get_default_client
 from tainted.models import FindingStatus, Severity
-from tainted.report import Report, build_report
+from tainted.report import build_report
 from tainted_ci.oidc import verify_github_ownership
 from tainted_ci.render import render_markdown, render_next_steps, render_tutorial
 

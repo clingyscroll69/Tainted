@@ -15,7 +15,7 @@ from tainted.fix.interview import (
     resolve_tool_plane_fix,
     tool_plane_interview,
 )
-from tainted.models import Candidate, Check, FindingStatus, SourceLocation
+from tainted.models import Candidate, Check, SourceLocation
 from tainted.report import build_report
 
 

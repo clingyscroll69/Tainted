@@ -8,7 +8,6 @@ finding to FIXED only when both assertions hold.
 from __future__ import annotations
 
 import httpx
-import pytest
 
 from tainted.dynamic.probes import prove_candidate
 from tainted.dynamic.replay import SupabaseReplay

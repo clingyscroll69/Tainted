@@ -19,7 +19,6 @@ from tainted.dynamic.route_probes import RouteProber
 from tainted.dynamic.target import ProveSetup
 from tainted.models import (
     Check,
-    Finding,
     FindingStatus,
     FixResult,
     ReverifyAssertion,

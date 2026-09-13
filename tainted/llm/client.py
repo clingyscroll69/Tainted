@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import abc
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from tainted.llm import prompts
 

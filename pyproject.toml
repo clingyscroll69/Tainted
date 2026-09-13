@@ -62,6 +62,32 @@ include = ["tainted*"]
 # The bundled Semgrep taint rules ship with the engine.
 "tainted.static" = ["rules/*.yaml"]
 
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [".venv", "tests/fixtures"]
+
+[tool.ruff.lint]
+# Deliberately narrow. The point of adopting a linter here is to catch the class of thing that
+# had already gone unnoticed — an unused import, a name in an annotation that was never
+# imported — not to restyle a codebase whose conventions are consistent and deliberate.
+#
+# `I` (import sorting) is left off for that reason: it wanted to reorder imports in 25 files,
+# and this codebase groups them meaningfully (engine, then surface-local) in a way isort's
+# alphabetisation would flatten. Turn it on with a dedicated commit if it is ever wanted.
+select = ["F", "E9"]
+
+[tool.mypy]
+python_version = "3.11"
+# Lenient on purpose: this codebase has never been type-checked, and a strict first pass would
+# produce hundreds of findings nobody reads. What is switched on is the part that was actually
+# broken — annotations referring to names that do not exist.
+files = ["tainted"]
+ignore_missing_imports = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+warn_unused_ignores = false
+
 [tool.pytest.ini_options]
 # No `asyncio_mode` here. It is a pytest-asyncio option, the suite contains no `async def`
 # tests, and the plugin was not installed — so the key did nothing except emit a

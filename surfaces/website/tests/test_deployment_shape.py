@@ -105,3 +105,30 @@ def test_the_warning_does_not_stop_the_app_from_serving(hosted_no_oauth):
     impossible to run one."""
     assert client.get("/healthz").status_code == 200
     assert client.get("/").status_code == 200
+
+
+# --------------------------------------------------------------------------- #
+# The document names itself
+# --------------------------------------------------------------------------- #
+def test_the_page_has_one_heading_that_names_it():
+    """The only h1 used to be the verdict — a value rewritten by every run ("Nothing analysed
+    yet" / "9 candidates unproven" / "Do not ship"), so the outline had no stable root and a
+    screen-reader user landed on a verdict with nothing saying what it judged."""
+    html = client.get("/").text
+    # Elements, not mentions: a CSS comment in the stylesheet says "the water column holds the
+    # page's <h1>", which a naive substring count picks up.
+    body = html.split("<body>", 1)[1]
+    assert body.count("<h1") == 1
+    assert '<h1 class="vh">Tainted' in body
+    # The verdict keeps its visual treatment; only its level in the outline changed.
+    assert 'class="verdict unproven" id="verdict"' in html
+    assert "<h2 class=\"verdict unproven\"" in html
+
+
+def test_the_disabled_reveal_button_does_not_use_a_fill_token_as_text():
+    """`--wash-faint` is documented in the token block as "inactive fills only — never text";
+    as text on the field ground it computes to 2.67:1."""
+    html = client.get("/").text
+    rule = html.split(".reveal:disabled{", 1)[1].split("}", 1)[0]
+    assert "--wash-faint" not in rule
+    assert "--wash-dim" in rule

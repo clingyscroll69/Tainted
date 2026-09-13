@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from tainted.models import FindingStatus
 from tainted.report import Report
 
 _EMOJI = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🔵", "info": "⚪"}

@@ -6,7 +6,6 @@ import json
 
 from tainted.checks.test_integrity import (
     CommandResult,
-    MutationResult,
     parse_stryker,
     run_mutation_testing,
 )

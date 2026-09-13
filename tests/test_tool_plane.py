@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 
 from tainted.checks.tool_plane import analyze_tool_plane, colocated_scopes, label_scopes
 from tainted.dynamic.sandbox import ToolCall, run_sandbox

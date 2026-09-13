@@ -534,7 +534,12 @@ h1,h2,h3,p{margin:0}
 @media (hover:hover) and (pointer:fine){
   .reveal:hover{color:var(--snow);background:rgb(var(--ch-wash) / .06)}
 }
-.reveal:disabled{color:var(--wash-faint);cursor:not-allowed;border-color:var(--rule-soft)}
+/* `--wash-dim`, not `--wash-faint`: the token's own note says faint is for inactive fills and
+   "never text". As text on the field ground it computes to 2.67:1, and although WCAG 1.4.3
+   exempts an inactive control, a reader still has to be able to read what the control would do
+   once it wakes up — this is the state the demo puts these buttons in. Dim measures ~5.3:1 and
+   still reads as unavailable against the enabled `--wash` beside it. */
+.reveal:disabled{color:var(--wash-dim);cursor:not-allowed;border-color:var(--rule-soft)}
 .setup .secret{display:flex;flex-direction:column;gap:4px}
 /* Same shape as a `.setup label`: a caption, then the controls. It is a div rather than a
    label because it holds two inputs and a button, and a label may name only one thing. */
@@ -2707,8 +2712,16 @@ html.is-diving,html.is-diving body{overflow:hidden}
         app. Nothing was scanned and no exploit ran. The workflow, the statuses, and the
         limits match a real run.
       </div>
+      <!-- The page's name, for anyone navigating by heading. The verdict below is the visual
+           headline and it is the right one — but it is also a *value*, rewritten by every run
+           ("Nothing analysed yet" → "9 candidates unproven" → "Do not ship"), so as the
+           document's only h1 it left the outline with no stable root and a screen-reader user
+           landing on a verdict with nothing to say what it was a verdict about. The verdict
+           keeps its size and its place; it is an h2 in the outline, which is also what it is
+           in meaning: the run's headline, under the page. -->
+      <h1 class="vh">Tainted — run view</h1>
       <div id="verdictlive" aria-live="polite">
-      <h1 class="verdict unproven" id="verdict"><span>Nothing</span> <span>analysed yet</span></h1>
+      <h2 class="verdict unproven" id="verdict"><span>Nothing</span> <span>analysed yet</span></h2>
       <p class="deckline" id="deckline">
         Give Tainted your code. It finds every place a stranger&rsquo;s data reaches a database
         query, a shell command, or another user&rsquo;s records. <b>A hole is not real until

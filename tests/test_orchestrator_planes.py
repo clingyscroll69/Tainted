@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tainted import analyze, prove
+from tainted import prove
 from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.route_probes import RouteProber
 from tainted.dynamic.sandbox import ToolCall

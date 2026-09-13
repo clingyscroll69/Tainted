@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 from mcp.server.mcpserver import MCPServer
 

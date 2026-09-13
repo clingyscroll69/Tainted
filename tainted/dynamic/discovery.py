@@ -13,10 +13,13 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Optional
+from typing import TYPE_CHECKING, Any, Iterable, Optional
 from urllib.parse import parse_qsl, urlparse
 
 from tainted.dynamic.target import Account, ProveSetup
+
+if TYPE_CHECKING:  # the annotation below names it; the import would be circular at runtime
+    from tainted.dynamic.target import SeedRecord
 
 # Values that look like an id worth trying: uuids, long digit strings, nanoid/cuid-ish tokens.
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)

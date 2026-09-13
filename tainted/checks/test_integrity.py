@@ -11,7 +11,10 @@ import json
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
+
+if TYPE_CHECKING:  # named in the return annotation below; imported lazily to keep this
+    from tainted.models import Candidate, MutationSummary  # module free of a cycle via models
 
 CommandRunner = Callable[[list[str], str], "CommandResult"]
 

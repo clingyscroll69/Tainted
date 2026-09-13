@@ -8,7 +8,6 @@ it before applying it.
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 from tainted.models import Candidate, FileEdit
 

@@ -19,7 +19,7 @@ import hmac
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 
 class PlanViolation(RuntimeError):

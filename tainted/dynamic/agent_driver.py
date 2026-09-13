@@ -18,6 +18,11 @@ by content, not whether a hardened system prompt can save it.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # the runtime import lives inside run(), where the cycle is avoidable
+    from tainted.dynamic.sandbox import ToolCall
+
 from typing import Any, Optional, Protocol
 
 from tainted.llm.client import LLMClient, LLMTier, LLMUnavailable

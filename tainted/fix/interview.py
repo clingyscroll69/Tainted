@@ -8,9 +8,8 @@ code is correct, so Tainted asks you instead and never writes the test itself.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
 
 from tainted.checks.test_integrity import SurvivingMutant
 from tainted.models import Candidate
