@@ -1,0 +1,39 @@
+# Example consumer workflow. Drop into .github/workflows/ in the app repo.
+name: Tainted
+on: [pull_request]
+
+permissions:
+  contents: read
+  id-token: write        # required so the workflow can mint an OIDC token
+  pull-requests: write   # for the job summary / PR comment
+
+jobs:
+  tainted:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Deploy your preview here (Vercel/Netlify/etc.) and capture its URL as PREVIEW_URL.
+      # - id: preview
+      #   run: echo "url=https://pr-${{ github.event.number }}.example.vercel.app" >> "$GITHUB_OUTPUT"
+
+      - name: Mint OIDC token for ownership proof
+        id: oidc
+        run: |
+          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=tainted" | python -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Run Tainted
+        uses: ./surfaces/ci     # or your-org/tainted-ci@v1
+        env:
+          TAINTED_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
+        with:
+          target-url: ${{ steps.preview.outputs.url }}
+          anon-key: ${{ secrets.SUPABASE_ANON_KEY }}
+          login-a: ${{ secrets.TAINTED_LOGIN_A }}
+          login-b: ${{ secrets.TAINTED_LOGIN_B }}
+          seed: ${{ vars.TAINTED_SEED }}
+          fail-on: high
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}

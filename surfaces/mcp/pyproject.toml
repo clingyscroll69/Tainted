@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tainted-mcp"
+version = "0.1.0"
+description = "Tainted MCP server — analyze/prove/fix as tools for a coding agent."
+requires-python = ">=3.11"
+# The core engine (`tainted`) is installed alongside from the same repo — see ../README.md.
+dependencies = [
+    "mcp>=2.0",
+]
+
+[project.scripts]
+tainted-mcp = "tainted_mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["tainted_mcp*"]

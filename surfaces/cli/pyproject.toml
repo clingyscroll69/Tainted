@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tainted-cli"
+version = "0.1.0"
+description = "Tainted local developer loop — analyze / watch / fix / pre-commit gate."
+requires-python = ">=3.11"
+# NOTE: the core engine (`tainted`) is installed alongside from the same repo — see
+# ../README.md. It is deliberately not listed here because it is not published to PyPI.
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.0",
+    "watchdog>=4.0",
+]
+
+[project.scripts]
+tainted = "tainted_cli.main:app"
+tainted-gate = "tainted_cli.hooks:gate"
+
+[tool.setuptools.packages.find]
+include = ["tainted_cli*"]

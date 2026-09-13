@@ -1,0 +1,326 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-05T00:00:00Z",
+  "title": "Design System: Tainted",
+  "extensions": {
+    "northStar": "The Mesophotic Dive",
+    "colorMeta": {
+      "thermocline-cyan": {
+        "role": "primary",
+        "displayName": "Thermocline Cyan",
+        "canonical": "#23D6E6",
+        "channel": "35 214 230",
+        "purpose": "The instrument. The only colour the interface uses about itself.",
+        "tonalRamp": [
+          "#4EE6F4",
+          "#23D6E6",
+          "#1D4054",
+          "#0C2C45"
+        ]
+      },
+      "lamp-red": {
+        "role": "secondary",
+        "displayName": "Lamp Red",
+        "canonical": "#FF5A46",
+        "channel": "255 90 70",
+        "purpose": "PROVEN and nothing else. An exploit executed and succeeded.",
+        "tonalRamp": [
+          "#FFB3A6",
+          "#FF9182",
+          "#FF5A46"
+        ]
+      },
+      "half-light-amber": {
+        "role": "secondary",
+        "displayName": "Half-Light Amber",
+        "canonical": "#E8A33D",
+        "channel": "232 163 61",
+        "purpose": "DEMONSTRATED (built, never fired) and any run that contacts nothing.",
+        "tonalRamp": [
+          "#F0C381",
+          "#E8A33D"
+        ]
+      },
+      "lamp-warm": {
+        "role": "tertiary",
+        "displayName": "Lamp Filament",
+        "canonical": "rgb(255 178 138)",
+        "channel": "255 178 138",
+        "purpose": "The cone's own light \u2014 hotter and yellower than Lamp Red, because the cone is light in water rather than a lit mark."
+      },
+      "depth-ramp": {
+        "role": "neutral",
+        "displayName": "The Depth Ramp",
+        "canonical": "#123C57",
+        "purpose": "One ordered scale, named once. The water column is drawn from it and so is every ground that must sit level with a given depth.",
+        "tonalRamp": [
+          "#123C57",
+          "#0C2C45",
+          "#0B2036",
+          "#071A2E",
+          "#05101F",
+          "#030A14",
+          "#02060D"
+        ]
+      },
+      "wash": {
+        "role": "neutral",
+        "displayName": "Wash",
+        "canonical": "#A8BACB",
+        "channel": "120 160 195",
+        "purpose": "Secondary text, tinted from the water's own hue. Never grey.",
+        "tonalRamp": [
+          "#F4F6FA",
+          "#A8BACB",
+          "#8496AC",
+          "#72849B",
+          "#43576E"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "verdict": {
+        "displayName": "Verdict",
+        "purpose": "The page's h1. Two lines, always, as separate spans so the accessible name keeps the break."
+      },
+      "readout": {
+        "displayName": "Readout",
+        "purpose": "The two dive-computer numbers. Mono, because they are measurements."
+      },
+      "finding": {
+        "displayName": "Finding",
+        "purpose": "Three sizes \u2014 30/24/21px \u2014 carrying the ranking that no badge is allowed to carry."
+      },
+      "data": {
+        "displayName": "Data",
+        "purpose": "Anything the engine measured: proof blocks, field values, coverage sentences."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Panel headings and micro-labels. 12px floor."
+      }
+    },
+    "fontFiles": [
+      {
+        "family": "Saira Condensed",
+        "weights": [
+          500,
+          600,
+          700
+        ],
+        "file": "/static/fonts/SairaCondensed-{weight}.woff2",
+        "preload": [
+          700
+        ]
+      },
+      {
+        "family": "Saira",
+        "variable": "100 900",
+        "file": "/static/fonts/Saira.woff2",
+        "preload": true
+      },
+      {
+        "family": "Martian Mono",
+        "variable": "100 800",
+        "file": "/static/fonts/MartianMono.woff2",
+        "preload": true
+      }
+    ],
+    "shadows": [
+      {
+        "name": "panel-ambient",
+        "value": "0 10px 26px -14px rgba(0,0,0,.85)",
+        "purpose": "The only neutral elevation shadow in the system. Panels and only panels."
+      },
+      {
+        "name": "stage-active",
+        "value": "0 0 0 4px rgb(35 214 230 / .18), 0 0 12px 2px rgb(35 214 230 / .5)",
+        "purpose": "The stage the run is currently at. A lit object, per the Lit-Object Rule."
+      },
+      {
+        "name": "thermocline-bloom",
+        "value": "0 0 22px 3px rgb(35 214 230 / .42)",
+        "purpose": "The ownership boundary crossing the whole column."
+      },
+      {
+        "name": "proven-bulb",
+        "value": "0 0 0 4px rgb(255 90 70 / .14), 0 0 16px 3px rgb(255 90 70 / .38)",
+        "purpose": "A finding whose exploit executed. The only warm halo."
+      },
+      {
+        "name": "button-hover",
+        "value": "0 6px 22px -6px rgb(35 214 230 / .55)",
+        "purpose": "Primary button hover only."
+      }
+    ],
+    "motion": [
+      {
+        "name": "descent",
+        "value": "cubic-bezier(.22,.61,.36,1)",
+        "duration": "620ms",
+        "purpose": "The lamp's travel down the column. The system's one authored moment."
+      },
+      {
+        "name": "sounding descent",
+        "value": "velocity, integrated per frame \u2014 not an easing curve",
+        "duration": "none: cruise ceiling 240px/s, inertia 0.55s, braking 1.9/s",
+        "purpose": "The submersible's travel. It is given a velocity and a frontier, never a duration and never a destination it has not earned: it accelerates under its own inertia and brakes into the frontier on an exponential approach, so it never overshoots and never snaps. Replaced an awaited chain of eased travels with a hold between each, which is what made the descent read as a slideshow."
+      },
+      {
+        "name": "vehicle",
+        "value": "driven from --sub-run (0 hovering, 1 at cruise)",
+        "duration": "continuous",
+        "purpose": "Hull pitch, thruster rotation, ballast bubble rate and the splay of the two floodlights all read one number, so the vehicle cannot be drawn under power while it is holding station."
+      },
+      {
+        "name": "depth colour loss",
+        "value": "filter: saturate(1 - dsat), quantised to 40 steps",
+        "duration": "continuous, with depth",
+        "purpose": "The sea loses its colour as the vehicle descends; the floodlights sit outside the filter, so by the trench the only warm thing in frame is the light being carried. Quantised because saturate() re-rasterises the plane it is on."
+      },
+      {
+        "name": "state",
+        "value": "ease-out",
+        "duration": "450-600ms",
+        "purpose": "Proof-strength colour changes as a finding ignites."
+      },
+      {
+        "name": "control",
+        "value": "ease-out",
+        "duration": "180ms",
+        "purpose": "Button and control hover."
+      },
+      {
+        "name": "reduced",
+        "value": "1ms, animation-iteration-count 1",
+        "purpose": "Reduced motion resolves to the final state instantly. Read live via a matchMedia change listener, never captured once at load. An infinite animation given a near-zero duration flickers, which is the opposite of what was asked for. In the sounding it removes travel and every ambient loop, but not the sea, which is picture rather than motion \u2014 and the run still completes."
+      },
+      {
+        "name": "breach",
+        "value": "ease-out",
+        "duration": "320ms",
+        "purpose": "A layer's ceiling giving way, once every candidate inside it has been attempted."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "findings-split",
+        "value": "1240px",
+        "purpose": "Findings split into claim | evidence."
+      },
+      {
+        "name": "rail-drops",
+        "value": "1180px",
+        "purpose": "Instrument rail moves below the rig as a 2-up; descent narrows to 250px."
+      },
+      {
+        "name": "single-column",
+        "value": "860px",
+        "purpose": "One column, water first, deck unpins, form fields go to 16px."
+      },
+      {
+        "name": "phone",
+        "value": "460px",
+        "purpose": "Tighter gutters, flow chips rotate vertical, thermocline label moves below the marks."
+      },
+      {
+        "name": "short-viewport",
+        "value": "max-height 940px",
+        "purpose": "Water body compresses so the depth axis is not truncated."
+      },
+      {
+        "name": "very-short-viewport",
+        "value": "max-height 720px",
+        "purpose": "Second compression step. The verdict, thermocline and top of the descent stay on one screen."
+      }
+    ],
+    "namedRules": [
+      {
+        "name": "The Lamp Rule",
+        "text": "Warm ink appears only where the engine did the corresponding thing. Red means an exploit executed and succeeded; amber means built-but-not-fired, or a run that contacted nothing. Colour is proof strength, never severity and never emphasis."
+      },
+      {
+        "name": "The One Instrument Rule",
+        "text": "Cyan is the only colour the interface may use about itself. Cyan is the product speaking; warm is the run reporting. Never mix registers on one element."
+      },
+      {
+        "name": "The Stated-State Rule",
+        "text": "No state is carried by colour or shape alone. Every dashed node, dimmed dot and coloured bulb has the word beside it or a visually-hidden equivalent."
+      },
+      {
+        "name": "The Lit-Object Rule",
+        "text": "Depth is carried by light, not drop shadows. A zero-offset coloured halo is permitted only on an element that is emitting. Everything else takes the neutral panel ambient or nothing."
+      },
+      {
+        "name": "The Twelve-Pixel Floor",
+        "text": "No text below 12px anywhere. The ramp is 12/13/15/17/21/24/30 plus two clamped display sizes, with nothing in between."
+      },
+      {
+        "name": "The Counted-Words Rule",
+        "text": "Every quantity in prose is counted from the findings at render time and spelled from a word table, never authored."
+      },
+      {
+        "name": "The Tabular Rule",
+        "text": "tabular-nums on body. Every number sits in a column that has to line up."
+      },
+      {
+        "name": "The Stratum Rule",
+        "text": "Each check axis is a layer of the water column with a ceiling of its own, named once in a single table that every picture reads. A candidate is drawn inside its own layer and never outside it; the water darkens by exactly one step of the seven-stop ramp per ceiling crossed. Layer names and the engine's pipeline stage names are separate vocabularies and may not overlap."
+      },
+      {
+        "name": "The Unmeasured-Progress Rule",
+        "text": "No percentage, fraction or filling bar for the progress of a run. The engine returns one report at the end and streams nothing, so a progress indicator is segmented by real layers and filled by real attempts \u2014 and while the request is in flight it holds where it is and says in words that nothing is proved yet."
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one action on the surface: Analyze, or Arm & prove. Square, tracked, cyan.",
+      "html": "<button class=\"ds-btn\">ARM &amp; PROVE</button>",
+      "css": ".ds-btn{display:inline-flex;align-items:center;gap:11px;min-height:46px;padding:13px 22px;border:1px solid #23D6E6;background:#23D6E6;color:#02141A;cursor:pointer;font-family:'Saira Condensed',system-ui,sans-serif;font-weight:700;font-size:.8125rem;letter-spacing:.15em;text-transform:uppercase;border-radius:0;transition:background .18s ease-out,box-shadow .18s ease-out,transform .18s ease-out}.ds-btn:hover{background:#4EE6F4;box-shadow:0 6px 22px -6px rgb(35 214 230 / .55)}.ds-btn:active{transform:translateY(1px)}.ds-btn:disabled{background:transparent;color:#8496AC;border-color:rgb(120 160 195 / .16);cursor:not-allowed}"
+    },
+    {
+      "name": "Field",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "A sunk well on a lifted panel. Mono value, cyan caret, 16px on mobile so iOS does not zoom.",
+      "html": "<label class=\"ds-lbl\">Target URL<input class=\"ds-in\" placeholder=\"http://localhost:54321\"></label>",
+      "css": ".ds-lbl{display:flex;flex-direction:column;gap:4px;font-family:'Saira Condensed',system-ui,sans-serif;font-size:.75rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#8496AC}.ds-in{background:rgba(0,0,0,.24);border:1px solid #72849B;border-radius:3px;color:#F4F6FA;font-family:'Martian Mono',ui-monospace,monospace;font-size:.8125rem;padding:9px 10px;min-height:44px;caret-color:#23D6E6;transition:border-color .15s ease}.ds-in:focus{border-color:#23D6E6}.ds-in:focus-visible{outline:2px solid #23D6E6;outline-offset:3px}@media (max-width:860px){.ds-in{font-size:1rem}}"
+    },
+    {
+      "name": "Proof Block",
+      "kind": "custom",
+      "refersTo": "proof-block",
+      "description": "The executed exploit, printed verbatim on a ground below the page ink. Warm ink only where the attack actually landed; a status the app refused prints in instrument cyan.",
+      "html": "<div class=\"ds-proof\"><div class=\"ds-proof-h\">EXECUTED EXPLOIT</div><pre class=\"ds-proof-b\"><span class=\"dim\">as user B &rarr;</span> GET /rest/v1/invoices?id=eq.1043\n\n<span class=\"hit\">200</span>  &middot;  rows_returned <span class=\"hit\">1</span>\n<span class=\"hit\">&rarr; B received A's row.</span></pre></div>",
+      "css": ".ds-proof{border:1px solid rgb(120 160 195 / .16);background:#02080F;max-width:74ch;border-radius:0}.ds-proof-h{padding:8px 14px;border-bottom:1px solid rgb(120 160 195 / .09);font-family:'Saira Condensed',system-ui,sans-serif;font-weight:600;font-size:.75rem;letter-spacing:.16em;text-transform:uppercase;color:#8496AC}.ds-proof-b{margin:0;padding:13px 15px;font-family:'Martian Mono',ui-monospace,monospace;font-size:.8125rem;line-height:1.75;color:#A8BACB;white-space:pre-wrap;word-break:break-word;letter-spacing:-.025em}.ds-proof-b .hit{color:#FF5A46}.ds-proof-b .ok{color:#23D6E6}.ds-proof-b .dim{color:#8496AC}"
+    },
+    {
+      "name": "Ownership Chip",
+      "kind": "custom",
+      "refersTo": "gate-chip",
+      "description": "Answers what would happen if you pressed Arm right now. Derived from the form on every keystroke, never from the last report. Three states, three inks.",
+      "html": "<span class=\"ds-gate is-verified\"><svg viewBox=\"0 0 16 16\" aria-hidden=\"true\"><path d=\"M8 1.7 2.8 4v4c0 3.2 2.2 5.6 5.2 6.4 3-.8 5.2-3.2 5.2-6.4V4Z\"/><path d=\"M5.9 8.1 7.4 9.6l2.9-3\"/></svg>Ownership <b>VERIFIED &middot; localhost</b></span>",
+      "css": ".ds-gate{display:flex;align-items:center;gap:9px;font-size:.75rem;color:#A8BACB}.ds-gate svg{width:15px;height:15px;stroke:var(--gate-ink,#23D6E6);fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.ds-gate b{font-family:'Martian Mono',ui-monospace,monospace;font-weight:500;font-size:.8125rem;color:var(--gate-ink,#23D6E6);letter-spacing:-.02em}.ds-gate.is-verified{--gate-ink:#23D6E6}.ds-gate.is-demo{--gate-ink:#E8A33D}.ds-gate.is-open{--gate-ink:#8496AC}"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "A hairline container lifted one value off its ground. Never a card, never nested.",
+      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-h\">PROOF LOG</div><div class=\"ds-panel-b\">Waiting for the lamp.</div></section>",
+      "css": ".ds-panel{background:rgb(11 26 44 / .62);border:1px solid rgb(120 160 195 / .16);box-shadow:0 10px 26px -14px rgba(0,0,0,.85);border-radius:0}.ds-panel-h{display:flex;align-items:baseline;gap:12px;padding:11px 16px;border-bottom:1px solid rgb(120 160 195 / .09);font-family:'Saira Condensed',system-ui,sans-serif;font-weight:600;font-size:.75rem;letter-spacing:.19em;text-transform:uppercase;color:#8496AC}.ds-panel-b{padding:15px 18px;font-family:Saira,system-ui,sans-serif;font-size:.9375rem;color:#A8BACB}"
+    },
+    {
+      "name": "The Sounding",
+      "kind": "overlay",
+      "refersTo": "sounding",
+      "description": "The descent, with the screen handed over. Arm & prove locks scroll and makes the page inert; the lamp holds the optical centre while the column travels past it, one stratum per check axis. A layer is breached only when every candidate inside it has been attempted; an empty layer is crossed and says so. It writes no results of its own \u2014 it calls the page's ignite() and reads settle()'s verdict back out of the DOM. Esc and one control leave it: before the report that cancels the request, after it that skips to the result.",
+      "html": "<div class=\"ds-snd\"><span class=\"ds-snd-ceil\"></span><span class=\"ds-snd-zn\"><b>The drop-off</b><i>bola \u00b7 depth 48</i></span><span class=\"ds-pip\"><i class=\"ds-dot\"></i><b>GET /api/invoices/[id] reads invoices by id with no ownership check</b><em>Proven</em></span></div>",
+      "css": ".ds-snd{position:relative;height:150px;background:linear-gradient(180deg,#05101F,#030A14);overflow:hidden;font-family:'Saira',system-ui,sans-serif}.ds-snd-ceil{position:absolute;left:0;right:0;top:0;height:1px;background:rgb(120 160 195 / .3)}.ds-snd-zn{position:absolute;left:20px;top:12px;display:block}.ds-snd-zn b{display:block;font-family:'Saira Condensed',system-ui,sans-serif;font-weight:600;font-size:1.0625rem;letter-spacing:.15em;text-transform:uppercase;color:#F4F6FA}.ds-snd-zn i{display:block;font-style:normal;font-family:'Martian Mono',ui-monospace,monospace;font-size:.75rem;color:#8496AC;margin-top:3px}.ds-pip{position:absolute;left:20px;top:74px;right:20px;display:grid;grid-template-columns:15px minmax(0,1fr) auto;gap:0 12px;align-items:center}.ds-dot{width:15px;height:15px;border-radius:50%;background:#FF5A46;border:1.5px solid #FF5A46;box-shadow:0 0 0 4px rgb(255 90 70 / .14),0 0 16px 3px rgb(255 90 70 / .38)}.ds-pip b{font-family:'Saira Condensed',system-ui,sans-serif;font-weight:600;font-size:.9375rem;color:#F4F6FA;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ds-pip em{font-style:normal;font-family:'Saira Condensed',system-ui,sans-serif;font-weight:700;font-size:.75rem;letter-spacing:.13em;text-transform:uppercase;color:#FF5A46}"
+    }
+  ]
+}

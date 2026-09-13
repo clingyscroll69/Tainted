@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tainted"
+version = "0.1.0"
+description = "A security scanner for AI-written apps: finds where untrusted data reaches a dangerous place, proves it by attacking, and fixes it."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Tainted" }]
+
+dependencies = [
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "google-genai>=2.0",
+    "httpx>=0.27",
+    "networkx>=3.0",
+    "sqlglot>=25.0",
+    "tree-sitter>=0.21",
+    "tree-sitter-language-pack>=0.2",
+]
+
+[project.optional-dependencies]
+# Traffic discovery: walks the running app and captures the requests its own frontend makes,
+# so an object reference is found wherever it sits. Optional — without it `prove` still fires
+# every static candidate, it just cannot discover references the source never spells out.
+dynamic = ["playwright>=1.40"]
+# Interprocedural taint. Semgrep is heavy, so it is installed on demand; without it the
+# per-handler route scan carries the request plane and the report says the taint pass was
+# skipped rather than implying there was nothing to find.
+semgrep = ["semgrep>=1.50"]
+# Signature verification for CI OIDC ownership. Without it the claims are still checked and
+# the result records that the signature was not independently verified.
+oidc = ["pyjwt[crypto]>=2.8"]
+# DNS TXT ownership verification for stable non-local targets.
+dns = ["dnspython>=2.4"]
+# Third-party validation of the injection generator (not of the detector).
+bench = ["agentdojo>=0.1"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+all = [
+    "playwright>=1.40",
+    "semgrep>=1.50",
+    "pyjwt[crypto]>=2.8",
+    "dnspython>=2.4",
+]
+
+[tool.setuptools.packages.find]
+include = ["tainted*"]
+
+[tool.setuptools.package-data]
+# The bundled Semgrep taint rules ship with the engine.
+"tainted.static" = ["rules/*.yaml"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

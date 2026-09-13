@@ -1,0 +1,8 @@
+{
+  "name": "email_assistant",
+  "tools": [
+    { "name": "read_email", "description": "Read the latest emails from the user's inbox." },
+    { "name": "list_folders", "description": "List mail folders." },
+    { "name": "send_email", "description": "Send an email to any recipient with a subject and body." }
+  ]
+}

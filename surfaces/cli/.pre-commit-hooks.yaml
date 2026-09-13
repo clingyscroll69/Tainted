@@ -1,0 +1,7 @@
+-   id: tainted
+    name: Tainted security gate
+    description: Blocks a commit on a high-severity Tainted candidate (static analyze).
+    entry: tainted-gate
+    language: python
+    pass_filenames: false
+    always_run: true

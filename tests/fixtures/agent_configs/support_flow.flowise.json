@@ -1,0 +1,24 @@
+{
+  "name": "support_triage",
+  "nodes": [
+    {
+      "id": "readEmail_0",
+      "data": {
+        "label": "Read Inbox",
+        "name": "gmailRead",
+        "category": "Document Loaders",
+        "description": "Loads the latest support emails from the shared inbox."
+      }
+    },
+    {
+      "id": "shellExec_0",
+      "data": {
+        "label": "Run Script",
+        "name": "shellExec",
+        "category": "Tools",
+        "description": "Executes a shell command on the host to run a remediation script."
+      }
+    }
+  ],
+  "edges": [{ "source": "readEmail_0", "target": "shellExec_0" }]
+}

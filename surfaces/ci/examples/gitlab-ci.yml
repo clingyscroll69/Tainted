@@ -1,0 +1,22 @@
+# Example GitLab CI job. GitLab mints an OIDC JWT via the `id_tokens` keyword.
+tainted:
+  stage: test
+  image: python:3.12-slim
+  id_tokens:
+    TAINTED_OIDC_TOKEN:
+      aud: tainted
+  variables:
+    TAINTED_REPO: "$CI_PROJECT_DIR"
+    TAINTED_TARGET_URL: "$PREVIEW_URL"           # set from your review-app deploy
+    TAINTED_ANON_KEY: "$SUPABASE_ANON_KEY"
+    TAINTED_LOGIN_A: "$TAINTED_LOGIN_A"
+    TAINTED_LOGIN_B: "$TAINTED_LOGIN_B"
+    TAINTED_SEED: "$TAINTED_SEED"
+    TAINTED_FAIL_ON: "high"
+    # The engine reads GITHUB_REPOSITORY; map GitLab's project path onto it.
+    GITHUB_REPOSITORY: "$CI_PROJECT_PATH"
+  script:
+    - pip install -e . && pip install -e surfaces/ci
+    - tainted-ci
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'

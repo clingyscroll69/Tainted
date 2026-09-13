@@ -1,0 +1,18 @@
+{
+  "buildPath": "code",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "surfaces/website/frontend/index.html"
+        ],
+        "createdAt": "2026-09-03T10:58:39.413Z",
+        "reason": "User locked the Mesophotic Descent world (seed 9a68268c, bolder re-roll); thermocline cyan and lamp red are emitted light in that world, and lit-vs-dark is this surface's proof-strength encoding per the direction contract. Decorative glows on the verdict and readout numerals were removed rather than ignored; remaining glow is confined to the lamp bulbs, the thermocline band, and the active descent node."
+      }
+    ]
+  }
+}

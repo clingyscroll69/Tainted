@@ -1,0 +1,28 @@
+# Secrets — never commit
+.env
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Tooling caches
+.semgrep/
+node_modules/
+
+# OS
+.DS_Store
+
+# Tooling state (transient; the refs/ and review/ images are kept deliberately)
+.impeccable/hook.cache.json
+.impeccable/questions/

@@ -1,0 +1,102 @@
+# Taint rules for classic injection — the deliberate escapes from the safe abstraction.
+#
+# AI code sits on parameterized clients, so these fire seldom. "Seldom" is the point: what they
+# catch is the raw query written for an awkward LIKE, the dynamic ORDER BY parameterization
+# cannot cover, the shell-out, the template rendered from user input — the places somebody
+# reached *around* the ORM because it was inconvenient, which is where the real ones live.
+#
+# Unlike the regex pre-pass these are taint-mode, so an interpolated *constant* does not fire;
+# only a value that actually flows from a request does.
+rules:
+  - id: tainted-user-input-to-raw-sql-js
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      tainted_kind: sql
+    message: User input reaches a raw SQL construct without parameterization.
+    mode: taint
+    pattern-sources:
+      - pattern: $REQ.params
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params.$P
+      - pattern: $REQ.query.$P
+      - pattern: $REQ.body.$P
+    pattern-sanitizers:
+      - pattern: parseInt(...)
+      - pattern: Number(...)
+    pattern-sinks:
+      - pattern: $DB.query(`...`)
+      - pattern: $DB.raw(`...`)
+      - pattern: $DB.unsafe(`...`)
+      - pattern: $DB.execute(`...`)
+      - patterns:
+          - pattern: $DB.query($SQL, ...)
+          - pattern-not: $DB.query("...", ...)
+
+  - id: tainted-user-input-to-shell-js
+    languages: [javascript, typescript]
+    severity: ERROR
+    metadata:
+      tainted_kind: command
+    message: User input reaches a shell execution.
+    mode: taint
+    pattern-sources:
+      - pattern: $REQ.params.$P
+      - pattern: $REQ.query.$P
+      - pattern: $REQ.body.$P
+    pattern-sinks:
+      - pattern: exec(...)
+      - pattern: execSync(...)
+      - pattern: child_process.exec(...)
+      - pattern: child_process.execSync(...)
+
+  - id: tainted-user-input-to-raw-sql-python
+    languages: [python]
+    severity: ERROR
+    metadata:
+      tainted_kind: sql
+    message: User input reaches a raw SQL construct without parameterization.
+    mode: taint
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.args[...]
+      - pattern: request.form[...]
+      - pattern: request.json[...]
+      - pattern: request.query_params[...]
+    pattern-sanitizers:
+      - pattern: int(...)
+    pattern-sinks:
+      - pattern: $CUR.execute(...)
+      - pattern: $DB.raw(...)
+      - pattern: text(...)
+
+  - id: tainted-user-input-to-shell-python
+    languages: [python]
+    severity: ERROR
+    metadata:
+      tainted_kind: command
+    message: User input reaches a shell execution.
+    mode: taint
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form[...]
+      - pattern: request.json[...]
+    pattern-sinks:
+      - pattern: os.system(...)
+      - pattern: subprocess.run(...)
+      - pattern: subprocess.call(...)
+      - pattern: subprocess.Popen(...)
+
+  - id: tainted-user-input-to-template-python
+    languages: [python]
+    severity: ERROR
+    metadata:
+      tainted_kind: template
+    message: User input reaches server-side template rendering (SSTI).
+    mode: taint
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.form[...]
+    pattern-sinks:
+      - pattern: render_template_string(...)

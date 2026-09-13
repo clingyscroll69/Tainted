@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tainted-ci"
+version = "0.1.0"
+description = "Tainted CI runner — analyze + prove against a preview deploy, gate the pipeline."
+requires-python = ">=3.11"
+# The core engine (`tainted`) is installed alongside from the same repo — see ../README.md.
+dependencies = [
+    "PyJWT>=2.8",  # OIDC signature verification against the provider JWKS
+]
+
+[project.scripts]
+tainted-ci = "tainted_ci.entrypoint:main"
+
+[tool.setuptools.packages.find]
+include = ["tainted_ci*"]

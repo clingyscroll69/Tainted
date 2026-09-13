@@ -1,0 +1,59 @@
+# Taint rules for the request plane: a request-supplied reference reaching a database read.
+#
+# These deliberately stop at the *flow*. Whether the read is safe depends on an ownership
+# predicate, which is a property of the surrounding handler rather than of the dataflow, so
+# Tainted post-filters every hit through `routes.scoping_signals`. A rule that tried to encode
+# the predicate as a sanitizer would silently drop the cases where the predicate is present but
+# wrong, which are the ones worth finding.
+rules:
+  - id: tainted-request-param-to-db-read-js
+    languages: [javascript, typescript]
+    severity: WARNING
+    message: >-
+      A request-supplied value reaches a database read. If it names a record owned by a specific
+      user and no predicate scopes the query to the caller, this is Broken Object Level
+      Authorization.
+    mode: taint
+    pattern-sources:
+      - pattern: $REQ.params
+      - pattern: $REQ.query
+      - pattern: $REQ.body
+      - pattern: $REQ.params.$P
+      - pattern: $REQ.query.$P
+      - pattern: (await $CTX.params).$P
+      - pattern: $CTX.params.$P
+      - pattern: new URL($REQ.url).searchParams.get(...)
+    pattern-sinks:
+      - pattern: $DB.eq(...)
+      - pattern: $DB.match(...)
+      - pattern: $DB.findUnique(...)
+      - pattern: $DB.findFirst(...)
+      - pattern: $DB.findMany(...)
+      - pattern: $DB.findById(...)
+      - pattern: $DB.findOne(...)
+      - pattern: $DB.query(...)
+      - pattern: $DB.raw(...)
+
+  - id: tainted-request-param-to-db-read-python
+    languages: [python]
+    severity: WARNING
+    message: >-
+      A request-supplied value reaches a database read. If it names a record owned by a specific
+      user and no predicate scopes the query to the caller, this is Broken Object Level
+      Authorization.
+    mode: taint
+    pattern-sources:
+      - pattern: request.args.get(...)
+      - pattern: request.args[...]
+      - pattern: request.json[...]
+      - pattern: request.get_json(...)
+      - pattern: request.form[...]
+      - pattern: request.path_params[...]
+      - pattern: request.query_params[...]
+    pattern-sinks:
+      - pattern: $DB.filter_by(...)
+      - pattern: $DB.filter(...)
+      - pattern: $DB.get(...)
+      - pattern: $DB.execute(...)
+      - pattern: $DB.select(...)
+      - pattern: $DB.eq(...)
