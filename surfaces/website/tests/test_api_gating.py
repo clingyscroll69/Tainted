@@ -76,8 +76,30 @@ def test_the_demo_runs_for_anyone_on_a_hosted_deployment(hosted, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_localhost_does_not_prove_ownership_to_a_hosted_deployment(hosted):
     """The gate used to read `is_local` as verified, so an anonymous POST naming
-    http://127.0.0.1 aimed the engine at the server's own internal services."""
+    http://127.0.0.1 aimed the engine at the server's own internal services.
+
+    The refusal is a 401 rather than a 403: a token is issued *to a caller* for a host, so
+    identity is checked first and a signed-out visitor is told to sign in instead of being
+    sent to an endpoint that would itself have answered 401. What matters here is that the
+    run is refused and nothing was fired — see the signed-in case below for the 403.
+    """
     r = client.post("/api/prove", json={"repo_path": REAL_PATH, "url": "http://127.0.0.1:9"})
+    assert r.status_code == 401
+    assert "sign in" in r.text.lower()
+
+
+def test_localhost_is_still_refused_for_a_signed_in_caller(hosted, monkeypatch):
+    """Identity is not ownership. Having signed in must not make the server's own loopback
+    reachable — this is the half of the gate the 401 above defers to."""
+    monkeypatch.setenv("TAINTED_TOKEN_SECRET", "a-long-random-value")
+    from backend import session_token
+
+    cookie = session_token.seal("gho_token", "octocat")
+    r = client.post(
+        "/api/prove",
+        json={"repo_path": REAL_PATH, "url": "http://127.0.0.1:9"},
+        cookies={"tainted_session": cookie},
+    )
     assert r.status_code == 403
     assert "ownership" in r.text.lower()
 

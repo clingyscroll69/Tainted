@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import secrets
 import threading
 from collections import OrderedDict
@@ -95,23 +96,77 @@ FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
 
 # --------------------------------------------------------------------------- #
-# Request models (the first-run form)
+# Request models (the first-run form), and what a repository may be called
 #
 # A request names its repo one of two ways: `repo` (a GitHub "owner/name" the signed-in user can
 # reach — fetched server-side, private included) or `repo_path` (a local path, the dev fallback).
+#
+# `repo` and `ref` are pasted into a GitHub API path (`/repos/{repo}/tarball/{ref}`). Left
+# unvalidated, a `..` segment normalises the URL onto a different endpoint entirely —
+# `repo="../../user"` resolves to `https://api.github.com/user` — so the server issues an
+# authenticated request the caller never named. The blast radius was small (the caller's own
+# token, GET only) and the fix is smaller: say what these may contain.
+#
+# `repo` is GitHub's own `owner/name` shape. `ref` is a branch, tag or sha, which may contain
+# slashes (`release/1.2`) but never a dot segment.
 # --------------------------------------------------------------------------- #
-class AnalyzeRequest(BaseModel):
+_REPO_RE = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+_REF_RE = re.compile(r"^[A-Za-z0-9._/-]{1,255}$")
+
+
+def _validate_repo(v: Optional[str]) -> Optional[str]:
+    v = (v or "").strip()
+    if not v:
+        return None
+    # The demo is not a repository and never reaches GitHub; it is spelled like one so the
+    # field accepts it, and `demo.is_demo` short-circuits long before any fetch.
+    if v == "demo/demo":
+        return v
+    if not _REPO_RE.match(v):
+        raise ValueError("repository must be in GitHub `owner/name` form")
+    return v
+
+
+def _validate_ref(v: Optional[str]) -> Optional[str]:
+    v = (v or "").strip()
+    if not v:
+        return None
+    if not _REF_RE.match(v) or any(part in (".", "..") for part in v.split("/")):
+        raise ValueError("ref must be a branch, tag or commit sha")
+    return v
+
+
+class RepoSelector(BaseModel):
+    """The two ways a request names the code to analyse.
+
+    Every endpoint that takes a repository inherits this, so the validation above happens once
+    and cannot be forgotten on a new route.
+    """
+
     repo_path: Optional[str] = None
     repo: Optional[str] = None
     ref: Optional[str] = None
-    only: Optional[str] = None
-    skip: Optional[str] = None
+
+    @field_validator("repo")
+    @classmethod
+    def _check_repo(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_repo(v)
+
+    @field_validator("ref")
+    @classmethod
+    def _check_ref(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_ref(v)
 
 
-class ProveRequest(BaseModel):
-    repo_path: Optional[str] = None
-    repo: Optional[str] = None
-    ref: Optional[str] = None
+class AnalyzeRequest(RepoSelector):
+    """Nothing beyond the repository. `only` / `skip` were declared here and never read —
+    `api_analyze` called `_executor.analyze(repo_path)` and passed neither, no client sent
+    them, and no test covered them. They are removed rather than wired, because wiring them
+    would have let a caller ask for `only=test_integrity`, which is the one check that runs a
+    repository's own test suite — a stranger's code executing on the server."""
+
+
+class ProveRequest(RepoSelector):
     url: str
     # Credentials arrive as four fields. `login_a` / `login_b` are the older single-field
     # `email:password` form and are still accepted, so a client that has not been updated
@@ -148,10 +203,7 @@ class ProveRequest(BaseModel):
         return v
 
 
-class FixRequest(BaseModel):
-    repo_path: Optional[str] = None
-    repo: Optional[str] = None
-    ref: Optional[str] = None
+class FixRequest(RepoSelector):
     # Which hole to fix. `finding_id` is the handle a client should send: it names the hole
     # itself, so it cannot drift. `index` is the older positional form, kept working for one
     # release — it now addresses the order the *report* published, which is what the browser
@@ -467,6 +519,12 @@ def _gate_ownership(req: ProveRequest, request: Request, setup: ProveSetup) -> N
     if local and target.is_local:
         return
 
+    # Identity before ownership. A token is issued *to a caller* for a host, so there is
+    # nothing to check against until we know who is asking — and a signed-out visitor was
+    # being told to go fetch a token from an endpoint that would have answered 401. Say the
+    # thing they have to do first. Still cheap: no DNS and no outbound request happens here.
+    session = None if local else _require_session(request)
+
     if not req.ownership_token:
         raise HTTPException(
             403,
@@ -478,7 +536,7 @@ def _gate_ownership(req: ProveRequest, request: Request, setup: ProveSetup) -> N
         )
 
     if not local:
-        session = _require_session(request)
+        assert session is not None  # _require_session raises rather than returning None
         if not ownership_token.configured():
             raise HTTPException(
                 503,

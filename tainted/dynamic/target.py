@@ -154,6 +154,25 @@ class Target(BaseModel):
         return (urlparse(self.url).hostname or "").lower()
 
     @property
+    def hosts(self) -> list[str]:
+        """Every host this target can cause a request to reach.
+
+        `url` is not the whole answer. Probes connect to `rest_base`, which is
+        `supabase_url or url` — so a gate that judged `host` alone was judging one of the two
+        places the engine actually goes. No surface sets `supabase_url` today, which is the
+        only reason that was not a live bypass; this makes the gate cover the field rather
+        than depend on nobody using it.
+        """
+        out = []
+        for raw in (self.url, self.supabase_url):
+            if not raw:
+                continue
+            h = (urlparse(raw).hostname or "").lower()
+            if h and h not in out:
+                out.append(h)
+        return out
+
+    @property
     def is_local(self) -> bool:
         """Whether the URL names the machine Tainted is running on.
 
@@ -179,8 +198,17 @@ class Target(BaseModel):
         Loopback, the unspecified address, link-local (cloud metadata included), private
         ranges, reserved and multicast space, and the mDNS/internal name suffixes. This is
         the literal reading of the host; `resolves_internal` also checks where a name points.
+
+        Judged over `hosts`, not `host`: one internal address among the places this target can
+        send a request is enough to refuse the target.
         """
-        h = self.host
+        names = self.hosts
+        if not names:
+            return True
+        return any(self._name_is_internal(h) for h in names)
+
+    @staticmethod
+    def _name_is_internal(h: str) -> bool:
         if not h:
             return True
         if h == "localhost" or h.endswith(_INTERNAL_SUFFIXES):
@@ -199,16 +227,18 @@ class Target(BaseModel):
         """
         if self.is_internal:
             return True
-        h = self.host
-        if _as_ip(h) is not None:
-            return False  # a literal address, already judged above
-        try:
-            addrs = (resolver or _default_addr_resolver)(h)
-        except Exception:  # noqa: BLE001 - resolver-agnostic; any failure is a refusal
-            return True
-        if not addrs:
-            return True
-        return any(_ip_is_internal(_as_ip(a)) for a in addrs)
+        for h in self.hosts:
+            if _as_ip(h) is not None:
+                continue  # a literal address, already judged above
+            try:
+                addrs = (resolver or _default_addr_resolver)(h)
+            except Exception:  # noqa: BLE001 - resolver-agnostic; any failure is a refusal
+                return True
+            if not addrs:
+                return True
+            if any(_ip_is_internal(_as_ip(a)) for a in addrs):
+                return True
+        return False
 
 
 class ProveSetup(BaseModel):
