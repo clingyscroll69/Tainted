@@ -1,0 +1,27 @@
+# The Tainted pre-commit hook.
+#
+# At the repository ROOT, and it has to be: pre-commit clones the repo a `.pre-commit-config.yaml`
+# names and reads `.pre-commit-hooks.yaml` from its top level. Nowhere else is looked at. The
+# earlier copy under `surfaces/cli/` was unreachable — `pre-commit install` against this repo
+# failed with "Expected /.pre-commit-hooks.yaml to exist".
+#
+# `language: system`, not `language: python`, and that is the second half of the same problem.
+# A `language: python` hook installs *this repository's root package* into a hook virtualenv and
+# then looks for `entry` in it. The root package here is the core engine, which has no
+# `tainted-gate` script and none of the CLI's dependencies — so the hook environment would build
+# cleanly and then fail to find the command. `system` runs the command the developer already
+# installed, which is the honest description of what this hook needs.
+#
+# So the prerequisite is one line, and surfaces/cli/README.md states it:
+#
+#     pip install -e . && pip install -e surfaces/cli
+#
+# A project that would rather not depend on a remote repo at all can skip the clone entirely and
+# use the `repo: local` form in the CLI README; it runs the same command.
+-   id: tainted
+    name: Tainted security gate
+    description: Blocks a commit on a high-severity Tainted candidate (static analyze).
+    entry: tainted-gate
+    language: system
+    pass_filenames: false
+    always_run: true

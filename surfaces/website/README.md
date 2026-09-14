@@ -58,6 +58,20 @@ docker build -f surfaces/website/Dockerfile -t tainted-web .
 docker run -p 8000:8000 -e GEMINI_API_KEY=$GEMINI_API_KEY tainted-web
 ```
 
+The image is the production entrypoint, and it differs from the dev server on four points that
+are each a deployment decision rather than a preference:
+
+- it ships the **Chromium** `prove` drives, not only the Playwright client that drives it;
+- it runs as an **unprivileged user** — `prove` executes untrusted, network-active code, and as
+  uid 0 a process escape and a container escape are the same event;
+- it sets **`TAINTED_REQUIRE_SANDBOX=1`**, so a real `prove` is refused until
+  `TAINTED_SANDBOX_URL` / `TAINTED_SANDBOX_TOKEN` point at a sandbox. **The worker they point at
+  is not in this repository** — `backend/sandbox.py` is the client for it. The bundled demo
+  contacts nothing and is exempt, so the container still demonstrates the whole loop untouched;
+- it **enforces** the CSP rather than sending it report-only.
+
+`PUBLISHING.md` §5 has the full `docker run`, and what each variable costs to get wrong.
+
 ## Sign in with GitHub
 
 Instead of typing a filesystem path, a visitor can **sign in with GitHub** and pick a

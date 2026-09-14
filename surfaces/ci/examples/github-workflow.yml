@@ -3,7 +3,7 @@ name: Tainted
 on: [pull_request]
 
 permissions:
-  contents: read
+  contents: read        # `contents: write` as well, if you turn `fix` on below
   id-token: write        # required so the workflow can mint an OIDC token
   pull-requests: write   # for the job summary / PR comment
 
@@ -26,7 +26,11 @@ jobs:
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
       - name: Run Tainted
-        uses: ./surfaces/ci     # or your-org/tainted-ci@v1
+        # `your-org/tainted@v0` once published; `./` when the action lives in this same repo.
+        # It is `./` and not `./surfaces/ci`, because a Docker action is built with the
+        # directory holding its action.yml as the build context, and this one needs the repo
+        # root — that is where the engine it installs lives.
+        uses: your-org/tainted@v0
         env:
           TAINTED_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
         with:
@@ -37,3 +41,7 @@ jobs:
           seed: ${{ vars.TAINTED_SEED }}
           fail-on: high
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          # Opens one PR carrying the fixes this run proved, each re-proved against the same
+          # preview. Needs `contents: write` above, and a token that can push.
+          fix: "false"
+          github-token: ${{ github.token }}

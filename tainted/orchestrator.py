@@ -286,13 +286,20 @@ def _prove_tool_plane(
         )
 
     if driver is None:
-        if llm is None:
+        # `build_driver` answers None for an LLM that exists but is not available — a key that
+        # was never set, a client constructed from an empty config. Only `llm is None` was
+        # checked, so that case fell through to `run_sandbox(..., driver=None)` and the sandbox
+        # called a method on it. It survived because `generate_injection` below happens to raise
+        # `LLMUnavailable` first, which is a rescue by coincidence and not by design: any
+        # injectable client that answers while reporting itself unavailable reaches the sandbox
+        # with nothing to drive it.
+        driver = build_driver(llm)
+        if driver is None:
             return _unprovable(
                 candidate,
                 "No LLM configured. The sandbox needs a model to drive the agent. "
                 "Reported from static analysis only.",
             )
-        driver = build_driver(llm)
 
     if llm is None:
         return _unprovable(

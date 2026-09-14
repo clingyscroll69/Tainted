@@ -7,6 +7,9 @@ name = "tainted-website"
 version = "0.1.0"
 description = "Tainted demonstration website — FastAPI over the engine, cytoscape tool graph."
 requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary" }
+authors = [{ name = "Tainted" }]
 # The core engine (`tainted`) is installed alongside from the same repo — see ../README.md.
 # Install the core with its dynamic extra so `prove` can drive a browser: pip install -e ".[dynamic]"
 dependencies = [
@@ -20,8 +23,21 @@ dependencies = [
 [project.scripts]
 tainted-web = "backend.run:main"
 
+# `frontend` is listed here as well as `backend`, and it has to be. The whole page — 110 KB of
+# index.html, the tour script, the five self-hosted faces and the graph library — is a sibling
+# directory, not a Python package, so a wheel built from `include = ["backend*"]` alone contained
+# the server and nothing it serves. That install answers 404 on `/`. It went unnoticed because
+# every documented path is a source install (`pip install -e`) or the container, where the
+# directory is simply there on disk; the moment anything builds a wheel, it is not.
+#
+# `namespaces = true` is what lets a directory with no `__init__.py` be collected, and
+# `package-data` names the files, because a wheel ships no data by default.
 [tool.setuptools.packages.find]
-include = ["backend*"]
+include = ["backend*", "frontend*"]
+namespaces = true
+
+[tool.setuptools.package-data]
+frontend = ["*.html", "*.js", "*.css", "fonts/*", "vendor/*"]
 
 [tool.pytest.ini_options]
 markers = [

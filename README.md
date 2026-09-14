@@ -94,3 +94,10 @@ browser.
 
 All four run on every push — see `.github/workflows/test.yml`, which installs exactly the
 two lines from Setup above, so a command that works in CI works on your machine.
+
+## Shipping it
+
+Each surface is a different kind of artifact: the CLI and MCP server are pip installs, the CI
+surface is a GitHub Action, the website is a container image. **`PUBLISHING.md`** has one
+section per surface and the single tag that publishes all four
+(`.github/workflows/release.yml`).

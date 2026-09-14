@@ -53,6 +53,10 @@ dev-all = [
     "pytest>=8.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    # The deployment-contract tests read action.yml and .pre-commit-hooks.yaml. They are the
+    # only thing in the suite that builds nothing and is still the only check on files whose
+    # failure mode is "the published artifact does not run".
+    "PyYAML>=6.0",
 ]
 
 [tool.setuptools.packages.find]

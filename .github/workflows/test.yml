@@ -6,6 +6,9 @@ name: tests
 on:
   push:
   pull_request:
+  # Called by release.yml, so a tag runs the same four suites as a push rather than a
+  # reimplementation of them that can drift.
+  workflow_call:
 
 jobs:
   test:

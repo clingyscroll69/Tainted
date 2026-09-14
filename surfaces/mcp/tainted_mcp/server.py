@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import threading
+import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Optional
 
 from mcp.server.mcpserver import MCPServer
 
+from tainted import __version__ as tainted_version
 from tainted import analyze as core_analyze
 from tainted import fix as core_fix
 from tainted import prove as core_prove
@@ -17,7 +21,7 @@ from tainted.fix import InterviewAnswer, tool_plane_interview
 from tainted.llm.gemini import get_default_client
 from tainted.models import Check, Finding
 from tainted.ownership import verify
-from tainted.report import build_report
+from tainted.report import build_report, select_candidate
 from tainted.selfdefense import PlanViolation
 from tainted_mcp.guard import (
     build_probe_plan,
@@ -28,7 +32,9 @@ from tainted_mcp.guard import (
 
 server = MCPServer(
     name="tainted",
-    version="0.1.0",
+    # The engine's version, not a second one to remember. A surface is a front end over one
+    # release of the core, and a client asking this server what it is should be told that.
+    version=tainted_version,
     instructions=(
         "Tainted finds where untrusted data reaches a dangerous place, proves it, and fixes it. "
         "Use `tainted_analyze` (fast, read-only) freely. `tainted_prove_*` runs real exploits "
@@ -48,14 +54,33 @@ def _llm_or_none():
 # --------------------------------------------------------------------------- #
 # analyze — synchronous, read-only
 # --------------------------------------------------------------------------- #
+# `test_integrity` measures a suite by mutating it and re-running it — `mutmut run`, `stryker
+# run` — which means executing the target repository's own test code. That is a reasonable
+# thing for a developer to ask for at their own terminal, and an unreasonable thing to leave one
+# argument away from a tool advertised to a calling agent as read-only: the repository is named
+# by the agent, and nothing else `tainted_analyze` does runs a line of it. So this surface
+# refuses the check by name and says why, rather than quietly running it. The website surface
+# dropped its `only` parameter outright for the same reason.
+_EXECUTES_THE_REPO = {Check.TEST_INTEGRITY}
+
+
 @server.tool(description="Statically analyze a repository for vulnerabilities (read-only).")
 def tainted_analyze(repo_path: str, only: str = "", skip: str = "") -> dict:
-    result = core_analyze(
-        repo_path,
-        llm=_llm_or_none(),
-        only=_parse_checks(only),
-        skip=_parse_checks(skip),
-    )
+    try:
+        wanted = _parse_checks(only)
+        unwanted = _parse_checks(skip)
+    except ValueError as exc:
+        return {"error": f"unknown check: {exc}"}
+    executing = sorted(c.value for c in (wanted or set()) & _EXECUTES_THE_REPO)
+    if executing:
+        return {
+            "error": (
+                f"{', '.join(executing)} runs the repository's own test suite (via mutmut or "
+                "Stryker), so it is not available from this read-only tool. Run it from the "
+                "`tainted` CLI, where the person who owns the code is the one asking."
+            )
+        }
+    result = core_analyze(repo_path, llm=_llm_or_none(), only=wanted, skip=unwanted)
     return build_report(result).model_dump(mode="json")
 
 
@@ -73,10 +98,45 @@ class _Job:
     # refused rather than obeyed.
     plan: Optional[object] = None
     plan_signature: str = ""
+    # When this job stopped running, so eviction can tell a result nobody has collected yet
+    # from one that has been sitting there since last week. None while it is still going.
+    finished: Optional[float] = None
 
 
-_JOBS: dict[str, _Job] = {}
+# --------------------------------------------------------------------------- #
+# What the server keeps, and for how long
+#
+# Over stdio this process lives as long as one editor session and the table stays small. Over
+# SSE or streamable-HTTP — both of which this server supports — it is a long-lived service, and
+# an unbounded dict of finished jobs is a report of every repository ever scanned, held in
+# memory until the process dies. Each entry also holds a full `Report`.
+#
+# So a finished job is kept long enough to be collected and no longer: eviction runs on every
+# start, dropping anything finished more than `_JOB_TTL_S` ago and then, if the table is still
+# over `_MAX_JOBS`, the oldest finished entries. A *running* job is never evicted — its worker
+# thread still holds the reference and a caller polling it is owed an answer. A caller that
+# comes back after the TTL gets "unknown job_id", which is the same answer it gets for a job
+# that never existed, and the tutorial says so.
+# --------------------------------------------------------------------------- #
+_JOBS: "OrderedDict[str, _Job]" = OrderedDict()
 _JOBS_LOCK = threading.Lock()
+_MAX_JOBS = max(1, int(os.environ.get("TAINTED_MCP_MAX_JOBS", "64")))
+_JOB_TTL_S = float(os.environ.get("TAINTED_MCP_JOB_TTL_S", "3600"))
+
+
+def _evict_finished(now: Optional[float] = None) -> None:
+    """Drop jobs nobody is coming back for. Caller holds `_JOBS_LOCK`."""
+    now = time.time() if now is None else now
+    for job_id, job in list(_JOBS.items()):
+        if job.status != "running" and job.finished and now - job.finished > _JOB_TTL_S:
+            del _JOBS[job_id]
+    if len(_JOBS) <= _MAX_JOBS:
+        return
+    for job_id, job in list(_JOBS.items()):
+        if len(_JOBS) <= _MAX_JOBS:
+            return
+        if job.status != "running":
+            del _JOBS[job_id]
 
 
 @server.tool(
@@ -114,6 +174,7 @@ def tainted_prove_start(
 
     job_id = uuid.uuid4().hex
     with _JOBS_LOCK:
+        _evict_finished()
         _JOBS[job_id] = _Job(plan=plan, plan_signature=signature)
     threading.Thread(
         target=_run_prove, args=(job_id, repo_path, setup), daemon=True
@@ -177,6 +238,8 @@ def _run_prove(job_id: str, repo_path: str, setup: ProveSetup) -> None:
     except Exception as exc:  # noqa: BLE001 - surfaced to the caller
         job.error = f"{type(exc).__name__}: {exc}"
         job.status = "error"
+    finally:
+        job.finished = time.time()
 
 
 # --------------------------------------------------------------------------- #
@@ -185,16 +248,24 @@ def _run_prove(job_id: str, repo_path: str, setup: ProveSetup) -> None:
 @server.tool(
     description=(
         "Generate the remediation for a candidate (patch-only; the client applies the edits). "
+        "Name it with `finding_id` (a candidate's own `id`, straight out of "
+        "tainted_analyze); `index` is a row number in that same report and goes stale "
+        "the moment the code does. "
         "Tool-plane candidates are architecturally underdetermined: call tainted_fix_interview "
         "first and pass the answers back here as {question_key: choice}."
     )
 )
-def tainted_fix(repo_path: str, index: int = 0, answers: Optional[dict] = None) -> dict:
+def tainted_fix(
+    repo_path: str,
+    index: int = 0,
+    answers: Optional[dict] = None,
+    finding_id: str = "",
+) -> dict:
     result = core_analyze(repo_path, llm=_llm_or_none())
-    candidates = result.ranked()
-    if index >= len(candidates):
-        return {"error": f"no candidate at index {index} (have {len(candidates)})"}
-    cand = candidates[index]
+    try:
+        cand = select_candidate(result, finding_id=finding_id or None, index=index)
+    except LookupError as exc:
+        return {"error": str(exc)}
 
     interview_answers = (
         [InterviewAnswer(key=k, choice=v) for k, v in answers.items()] if answers else None
@@ -227,12 +298,12 @@ def tainted_fix(repo_path: str, index: int = 0, answers: Optional[dict] = None) 
         "confirmation, provenance tracking."
     )
 )
-def tainted_fix_interview(repo_path: str, index: int = 0) -> dict:
+def tainted_fix_interview(repo_path: str, index: int = 0, finding_id: str = "") -> dict:
     result = core_analyze(repo_path, llm=_llm_or_none())
-    candidates = result.ranked()
-    if index >= len(candidates):
-        return {"error": f"no candidate at index {index} (have {len(candidates)})"}
-    cand = candidates[index]
+    try:
+        cand = select_candidate(result, finding_id=finding_id or None, index=index)
+    except LookupError as exc:
+        return {"error": str(exc)}
     if cand.check is not Check.AGENT_INJECTION:
         return {
             "interview": [],

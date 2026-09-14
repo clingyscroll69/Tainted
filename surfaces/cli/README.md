@@ -26,7 +26,7 @@ export GEMINI_API_KEY=...         # optional: turns on the LLM "meaning" registe
 tainted analyze ./my-app                         # ranked possible holes in the terminal
 tainted analyze ./my-app --only bola,rls --json  # narrow the checks + machine-readable output
 tainted watch ./my-app                           # re-analyze on every save
-tainted fix ./my-app --index 0 --apply           # write the fix to disk
+tainted fix ./my-app --finding-id 1db5cbc5 --apply  # write the fix to disk
 tainted prove ./my-app \                          # drive a running target
   --url http://localhost:54321 --anon-key "$ANON" \
   --login-a a@x.com:pw --login-b b@x.com:pw --seed invoices:<id>
@@ -44,15 +44,46 @@ tainted tutorial first-scan      # one lesson, with the commands to run and what
 target needs `--ownership-token` (checked via a DNS TXT record or a
 `/.well-known/tainted-verify` file).
 
+## Which hole is `fix` fixing?
+
+`analyze` prints a `#` and an `ID` for every row, and `fix` takes either:
+
+```bash
+tainted fix ./my-app --finding-id 1db5cbc5350811b5   # the hole itself; survives a re-run
+tainted fix ./my-app --index 0                        # the row number from that one run
+```
+
+Prefer the id. `#` is a position in the report that run drew, and both the code and the model's
+ranking move underneath it.
+
 ## Pre-commit
 
-Add this to a project's `.pre-commit-config.yaml`:
+The hook manifest is `.pre-commit-hooks.yaml` at the **repository root** — pre-commit reads it
+from there and nowhere else — and it is a `language: system` hook, so it runs the `tainted-gate`
+you installed above rather than building an environment of its own. (It cannot build one: a
+`language: python` hook installs *this repo's root package*, which is the engine, and the engine
+has no `tainted-gate` script and none of this surface's dependencies.)
+
+So: install Tainted, then add this to the project's `.pre-commit-config.yaml`:
 
 ```yaml
--   repo: <this repo>
+-   repo: https://github.com/OWNER/tainted
     rev: v0.1.0
     hooks:
       - id: tainted
+```
+
+Or skip the clone entirely and run the command already on your PATH:
+
+```yaml
+-   repo: local
+    hooks:
+      - id: tainted
+        name: Tainted security gate
+        entry: tainted-gate
+        language: system
+        pass_filenames: false
+        always_run: true
 ```
 
 `tainted analyze` exits 0 or 1. `prove` exits 1 when a high-severity finding is

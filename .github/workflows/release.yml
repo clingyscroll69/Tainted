@@ -1,0 +1,164 @@
+# Publishing all four surfaces from one tag.
+#
+# Each surface has a different *kind* of artifact, which is why this is one workflow and not
+# four: a tag produces the packages the CLI and MCP surfaces are installed from, the two images
+# the CI and website surfaces run as, and the GitHub Release that is itself how the Action is
+# published. Nothing here is the source of truth for a version — `tests/test_release_shape.py`
+# is, and the first job refuses a tag that disagrees with it.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)publish, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write   # create the Release and upload assets
+  packages: write   # push to GHCR
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ------------------------------------------------------------------------- #
+  # Nothing is published until the tag and the code agree about what this is.
+  # ------------------------------------------------------------------------- #
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - id: check
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          CODE=$(python -c "import re,pathlib;print(re.search(r'__version__ = \"([^\"]+)\"',pathlib.Path('tainted/__init__.py').read_text()).group(1))")
+          if [ "$VERSION" != "$CODE" ]; then
+            echo "::error::tag $TAG says $VERSION, tainted/__init__.py says $CODE. Bump the code and re-tag."
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  # The full suite, at the exact commit being published. A release is the one build nobody
+  # gets to skip the tests for.
+  test:
+    needs: version
+    uses: ./.github/workflows/test.yml
+
+  # ------------------------------------------------------------------------- #
+  # CLI and MCP: Python packages. The core ships alongside them, because it is not on PyPI
+  # and both surfaces import it — an installer needs all three wheels from one place.
+  # ------------------------------------------------------------------------- #
+  packages:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --upgrade pip build
+      - name: Build every distribution
+        run: |
+          set -euo pipefail
+          for d in . surfaces/cli surfaces/ci surfaces/mcp surfaces/website; do
+            python -m build --outdir dist "$d"
+          done
+          ls -la dist
+      - name: Install the wheels into a clean environment and run each entry point
+        # A wheel that builds is not a wheel that works: this is where a missing package-data
+        # line or a dependency that only ever came from the dev environment shows up.
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install --upgrade pip
+          /tmp/fresh/bin/pip install dist/tainted-*.whl dist/tainted_cli-*.whl \
+                                     dist/tainted_ci-*.whl dist/tainted_mcp-*.whl
+          /tmp/fresh/bin/tainted version
+          /tmp/fresh/bin/tainted tutorial
+          /tmp/fresh/bin/python -c "import tainted_mcp, tainted_ci; print('surfaces import clean')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/*
+
+  # ------------------------------------------------------------------------- #
+  # CI and website: container images.
+  #
+  # The CI image is also what makes the Action fast. Built from the repo root, because that is
+  # the context `surfaces/ci/Dockerfile` expects and the context GitHub gives a root action.yml.
+  # ------------------------------------------------------------------------- #
+  images:
+    needs: [version, test]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - surface: ci
+            image: tainted-ci
+          - surface: website
+            image: tainted-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: surfaces/${{ matrix.surface }}/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.version.outputs.version }}
+            ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ------------------------------------------------------------------------- #
+  # The Release. For the CI surface this *is* the publication: a Marketplace listing is created
+  # from a release whose tag holds an `action.yml` at the repository root.
+  # ------------------------------------------------------------------------- #
+  release:
+    needs: [version, packages, images]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: "Move the major tag, so a workflow pinned to @v0 follows this release"
+        run: |
+          set -euo pipefail
+          MAJOR="v$(echo '${{ needs.version.outputs.version }}' | cut -d. -f1)"
+          git tag -f "$MAJOR"
+          git push -f origin "refs/tags/$MAJOR"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          body: |
+            Install the CLI or the MCP server (the engine ships alongside; it is not on PyPI):
+
+                pip install <core wheel URL> <surface wheel URL>
+
+            Run a surface as a container:
+
+                docker run ghcr.io/${{ github.repository_owner }}/tainted-web:${{ needs.version.outputs.version }}
+
+            Use the Action:
+
+                uses: ${{ github.repository }}@v${{ needs.version.outputs.version }}

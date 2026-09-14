@@ -1,0 +1,88 @@
+# The Tainted GitHub Action.
+#
+# This file is at the repository ROOT, and it has to be. Two rules of GitHub Actions decide it,
+# and together they are why the earlier copy under `surfaces/ci/` could never have run:
+#
+#   1. A published action (`uses: owner/repo@v1`) is found by looking for `action.yml` at the
+#      root of that repository. Nowhere else is looked at.
+#   2. A Docker action's build context is the directory holding this file. So with this file in
+#      `surfaces/ci/`, the build context was `surfaces/ci/` — a directory containing neither
+#      `tainted/` nor the root `pyproject.toml`, both of which the Dockerfile copies. Every run
+#      failed at `COPY tainted /app/tainted` before a line of Python executed.
+#
+# At the root, the context is the repository, which is exactly what `surfaces/ci/Dockerfile`
+# expects. `tests/test_action_contract.py` holds that agreement in place.
+
+name: "Tainted"
+description: "Find where untrusted data reaches a dangerous place, prove it against the preview deploy, and gate the PR."
+author: "Tainted"
+
+inputs:
+  target-url:
+    description: "The running preview-deploy URL to prove against. Omit to run analyze-only."
+    required: false
+    default: ""
+  anon-key:
+    description: "Supabase anon key for the target."
+    required: false
+    default: ""
+  login-a:
+    description: "Account A as email:password (enables BOLA proof)."
+    required: false
+    default: ""
+  login-b:
+    description: "Account B as email:password."
+    required: false
+    default: ""
+  seed:
+    description: "Seed record as table:id (enables the targeted probe)."
+    required: false
+    default: ""
+  fail-on:
+    description: "Minimum severity that fails the job."
+    required: false
+    default: "high"
+  gemini-api-key:
+    description: "Optional Gemini key to enable the meaning register."
+    required: false
+    default: ""
+  fix:
+    description: >-
+      "true" to open a pull request carrying the deterministic fixes for every finding this run
+      proved, each re-proved against the same preview. Needs `github-token` with
+      `contents: write` and `pull-requests: write`.
+    required: false
+    default: ""
+  github-token:
+    description: >-
+      Token used to push the fix branch and open the pull request. Only read when `fix` is on;
+      pass ${{ github.token }} or a PAT. The default GITHUB_TOKEN cannot trigger other
+      workflows on the PR it opens.
+    required: false
+    default: ""
+
+runs:
+  using: "docker"
+  image: "surfaces/ci/Dockerfile"
+  env:
+    TAINTED_REPO: ${{ github.workspace }}
+    TAINTED_TARGET_URL: ${{ inputs.target-url }}
+    TAINTED_ANON_KEY: ${{ inputs.anon-key }}
+    TAINTED_LOGIN_A: ${{ inputs.login-a }}
+    TAINTED_LOGIN_B: ${{ inputs.login-b }}
+    TAINTED_SEED: ${{ inputs.seed }}
+    TAINTED_FAIL_ON: ${{ inputs.fail-on }}
+    GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+    GITHUB_REPOSITORY: ${{ github.repository }}
+    TAINTED_FIX: ${{ inputs.fix }}
+    # `gh pr create` and the `git push` before it both read GH_TOKEN. Passed through here so the
+    # auto-fix PR is reachable from the action at all — it was documented, tutorialised, and
+    # wired to nothing.
+    GH_TOKEN: ${{ inputs.github-token }}
+    GITHUB_BASE_REF: ${{ github.base_ref }}
+    # The workflow must request the OIDC token and pass it in as TAINTED_OIDC_TOKEN.
+    # (permissions: id-token: write) — see README.
+
+branding:
+  icon: "shield"
+  color: "red"

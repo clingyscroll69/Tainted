@@ -1,0 +1,30 @@
+# The build context for both Dockerfiles is the repository root, so everything here is sent to
+# the daemon on every build unless it is named. `.venv` alone is several hundred megabytes and
+# is never what the image wants — the image installs its own.
+.venv/
+venv/
+.git/
+.github/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.semgrep/
+node_modules/
+.DS_Store
+
+# Secrets. Neither Dockerfile copies these, and the point of the line is that neither ever can.
+.env
+*.env
+!.env.example
+
+# Not needed to run any surface.
+plans/
+.impeccable/
+.agents/
+DESIGN.md

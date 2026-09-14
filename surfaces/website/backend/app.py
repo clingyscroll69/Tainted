@@ -27,6 +27,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
+from tainted import __version__ as tainted_version
 from tainted import analyze as core_analyze
 from tainted import fix as core_fix
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
@@ -34,7 +35,7 @@ from tainted.fix import InterviewAnswer, tool_plane_interview
 from tainted.llm.gemini import get_default_client
 from tainted.models import AnalysisResult, Candidate, Finding
 from tainted.ownership import WELL_KNOWN_PATH, verify
-from tainted.report import build_report
+from tainted.report import select_candidate
 from backend import demo as demo_mode
 from backend import github
 from backend import keys
@@ -71,7 +72,9 @@ def _local_mode() -> bool:
 # import — which is also what lets it be tested both ways.
 app = FastAPI(
     title="Tainted",
-    version="0.1.0",
+    # The engine's version. A surface is a front end over one release of the core, and the
+    # OpenAPI document should say which one rather than carrying a number of its own to forget.
+    version=tainted_version,
     docs_url=None,
     redoc_url=None,
     openapi_url=None,
@@ -651,31 +654,14 @@ def api_prove(req: ProveRequest, request: Request):
 # release so an un-updated client keeps working, but it now indexes the order the report
 # actually published — the same list the browser drew.
 # --------------------------------------------------------------------------- #
-def _published_order(result) -> list[Candidate]:
-    """The candidates in the order a surface was shown them.
-
-    `build_report` lists carried findings first, then everything untried, and the frontend
-    concatenates the two in that order. Anything addressing "the nth row" has to mean this
-    list and no other.
-    """
-    report = build_report(result)
-    return [f.candidate for f in report.findings] + list(report.unproven_candidates)
-
-
+# Both halves now live in `tainted.report`, because the CLI and the MCP server had the same
+# boundary and the same bug, and a rule about which list a row number means is worth stating
+# once. `select_candidate` raises `LookupError`; the HTTP status is this surface's business.
 def _select_candidate(result, finding_id: Optional[str], index: int) -> Candidate:
-    if finding_id:
-        for cand in result.candidates:
-            if cand.id == finding_id:
-                return cand
-        raise HTTPException(
-            400,
-            f"no finding with id {finding_id} in this repository. Re-run the analysis — "
-            "the code may have changed since that report was drawn.",
-        )
-    published = _published_order(result)
-    if index >= len(published):
-        raise HTTPException(400, f"no candidate at index {index}")
-    return published[index]
+    try:
+        return select_candidate(result, finding_id=finding_id, index=index)
+    except LookupError as exc:
+        raise HTTPException(400, str(exc))
 
 
 # Bounded, so a long-lived process cannot accumulate results for checkouts that are long gone.

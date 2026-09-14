@@ -195,3 +195,64 @@ def _coverage(analysis: AnalysisResult, findings: list[Finding]) -> list[Coverag
             )
         )
     return notes
+
+
+# --------------------------------------------------------------------------- #
+# Naming one candidate out of many
+#
+# A surface shows a list and then has to be told which row the reader meant, across a boundary
+# that carries no objects — a CLI flag, an MCP argument, an HTTP body. There are two orders of
+# the same set in play and they are not the same order: `build_report` publishes candidates in
+# discovery order (carried findings first, then everything untried), while
+# `AnalysisResult.ranked()` sorts structural-first then by model score. Rendering one and
+# selecting from the other is how a reader asks to fix the RLS row at the top of the table and
+# is handed a patch for a BOLA route — and with the model enabled `rank_score` is not stable
+# between two runs, so the mismatch is not even reproducible.
+#
+# So both halves live here, in the engine, and every surface uses them. `published_order` is the
+# one list a surface may draw and address; `Candidate.id` is the handle that survives a re-run
+# and is what a client should send. The positional form stays supported because a human reading
+# a numbered table will always want to type the number.
+# --------------------------------------------------------------------------- #
+def published_order(
+    analysis: AnalysisResult, findings: Optional[list[Finding]] = None
+) -> list[Candidate]:
+    """The candidates in the order `build_report` publishes them.
+
+    Anything that means "the nth row" has to mean this list and no other.
+    """
+    report = build_report(analysis, findings)
+    return [f.candidate for f in report.findings] + list(report.unproven_candidates)
+
+
+def select_candidate(
+    analysis: AnalysisResult,
+    finding_id: Optional[str] = None,
+    index: int = 0,
+    findings: Optional[list[Finding]] = None,
+) -> Candidate:
+    """The one candidate a caller named, by id if they gave one and by row if they did not.
+
+    Raises `LookupError` — with a message written for the person who typed the wrong thing —
+    rather than returning None, so a surface cannot forget to check and go on to fix whatever
+    happened to be at position zero.
+    """
+    if finding_id:
+        for cand in analysis.candidates:
+            if cand.id == finding_id:
+                return cand
+        raise LookupError(
+            f"No finding with id {finding_id} in this repository. Re-run the analysis — "
+            "the code may have changed since that report was drawn."
+        )
+
+    published = published_order(analysis, findings)
+    # Negative indices are a valid Python expression and the wrong candidate: `-1` silently
+    # addresses the last row when the caller meant to address the first.
+    if index < 0 or index >= len(published):
+        raise LookupError(
+            f"No candidate at index {index}. This report lists {len(published)} "
+            f"(0–{len(published) - 1})." if published else
+            f"No candidate at index {index}. This report lists none."
+        )
+    return published[index]

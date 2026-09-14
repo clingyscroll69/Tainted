@@ -42,12 +42,27 @@ verifies the **signature** against the provider's JWKS when `PyJWT` is installed
 (it is, as one of this surface's dependencies). If it can't verify the
 signature, the report says so instead of pretending it checked.
 
+## Auto-fix PR
+
+`fix: "true"` (or `TAINTED_FIX=1`) takes every finding this run *proved* whose repair the code
+fully determines, writes it, re-proves it against this same preview, and opens one PR carrying
+the evidence. Tool-plane findings are reported, never auto-fixed — their repair depends on
+answers only a person has.
+
+It needs `permissions: contents: write` and a `github-token`, and it shells out to `git` and
+`gh`; the action's image installs both.
+
 ## Deploy
 
-- **GitHub Actions:** use `surfaces/ci` as a Docker action — see
-  `examples/github-workflow.yml` (note `permissions: id-token: write` and the
-  OIDC-token minting step).
+- **GitHub Actions:** `uses: OWNER/tainted@v0`. The manifest is `action.yml` at the
+  **repository root**, which is where GitHub looks and — because a Docker action's build context
+  is the directory holding its manifest — also the context `Dockerfile` below needs. See
+  `examples/github-workflow.yml` for the whole job (`permissions: id-token: write` and the
+  OIDC-token minting step are the two easy things to leave out).
 - **GitLab CI:** see `examples/gitlab-ci.yml` (uses the `id_tokens` keyword).
 - **Container:** `docker build -f surfaces/ci/Dockerfile -t tainted-ci .` (build
   context = repo root, so the core is included), then run it with the `TAINTED_*`
   environment variables.
+
+`PUBLISHING.md` §3 covers tagging, the moving `v0` tag, the Marketplace listing, and pushing a
+pre-built image so consumer jobs stop rebuilding it.

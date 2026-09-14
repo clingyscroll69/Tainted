@@ -53,28 +53,44 @@ def render_report(report: Report) -> None:
             f"[dim](rung {d.provenance.rung}: {_e(d.provenance.detail)})[/dim]"
         )
 
-    candidates = report.unproven_candidates or [f.candidate for f in report.findings]
-    if not candidates and not report.findings:
+    # The published order: what was carried to a finding first, then everything still untried.
+    # One list, drawn in the order `tainted fix --index` addresses, and it must be the whole set
+    # — the table used to show `findings or unproven`, so after a `prove` run every candidate
+    # the run did not carry simply vanished from the report that was supposed to account for it.
+    items: list = list(report.findings) + list(report.unproven_candidates)
+    if not items:
         console.print("\n[green]No candidates found.[/green]")
         return
 
+    # `#` and `ID` are how a reader points back at a row. `tainted fix` takes both, and a table
+    # that printed neither left `--index` a number you had to count out by eye — against a list
+    # whose order was not even the one `fix` was selecting from. The row number is this table's
+    # own position; the id belongs to the candidate and survives a re-run, so it is the one to
+    # quote in a script.
     table = Table(title="\nFindings", show_lines=False, expand=True)
+    table.add_column("#", no_wrap=True, justify="right")
+    table.add_column("ID", no_wrap=True, style="dim")
     table.add_column("Sev", no_wrap=True)
     table.add_column("Check", no_wrap=True)
     table.add_column("Title")
     table.add_column("Location", no_wrap=True)
 
-    items = report.findings if report.findings else candidates
-    for item in items:
+    for row, item in enumerate(items):
         cand = getattr(item, "candidate", item)
         sev = cand.severity
         table.add_row(
+            str(row),
+            _e(cand.id),
             f"[{_SEV_STYLE[sev]}]{sev.value.upper()}[/]",
             _e(cand.check.value),
             _e(cand.title),
             _e(cand.location),
         )
     console.print(table)
+    console.print(
+        "[dim]Fix one with `tainted fix <repo> --finding-id <ID>` "
+        "(or `--index <#>` for this run's numbering).[/dim]"
+    )
 
     for f in report.proven_findings:
         _render_proof(f)

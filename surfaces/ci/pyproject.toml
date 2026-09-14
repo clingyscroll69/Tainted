@@ -7,6 +7,9 @@ name = "tainted-ci"
 version = "0.1.0"
 description = "Tainted CI runner — analyze + prove against a preview deploy, gate the pipeline."
 requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary" }
+authors = [{ name = "Tainted" }]
 # The core engine (`tainted`) is installed alongside from the same repo — see ../README.md.
 dependencies = [
     "PyJWT>=2.8",  # OIDC signature verification against the provider JWKS

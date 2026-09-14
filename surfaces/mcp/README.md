@@ -15,9 +15,20 @@ short-lived, which fits `analyze` but can't hold open a real attack run. So:
   without overclaiming. Call it with no topic to list the topics. The server's own
   instructions point at it, so a client reads it before the first `prove`.
 
-Every tool that names a possible hole takes an `index`. That is a position in the
-ranked list `tainted_analyze` returns, counting from 0. An index past the end comes
-back as `{"error": "no candidate at index N (have M)"}`.
+## Naming a hole
+
+Every tool that names a possible hole takes **`finding_id`** — a candidate's own `id`, straight
+out of `tainted_analyze`. Use it. It names the hole itself, so it cannot drift.
+
+`index` still works and means a row of the list `tainted_analyze` published, counting from 0:
+its `findings` first, then its `unproven_candidates`. It is only meaningful for that one report
+— re-analysing after an edit renumbers everything, and with the model enabled the ranking is not
+stable between two runs even without an edit. Either handle, past the end or unknown, comes back
+as `{"error": "..."}` naming what you asked for.
+
+`tainted_analyze` is read-only and stays that way: `only=test_integrity` is refused, because
+that check measures a suite by running it (`mutmut`, Stryker) and this tool must not be one
+argument away from executing a repository's own code. Run it from the `tainted` CLI.
 
 ## Fixing an agent-injection hole
 
@@ -26,7 +37,7 @@ repairs, and the right one depends on facts only you hold: whether the agent rea
 needs both tools, whether a person can approve the risky action, and whether that
 action can afford to be slower. Tainted will not guess, so it asks.
 
-Call `tainted_fix_interview(repo_path, index)` first:
+Call `tainted_fix_interview(repo_path, finding_id=...)` first:
 
 ```json
 {
@@ -42,7 +53,7 @@ Call `tainted_fix_interview(repo_path, index)` first:
 Then pass the answers to `tainted_fix` as `{question_key: choice}`:
 
 ```json
-{"repo_path": "/path/to/app", "index": 0,
+{"repo_path": "/path/to/app", "finding_id": "c72a692b4e3bc491",
  "answers": {"needs_both": "yes", "human_available": "no", "latency_ok": "yes"}}
 ```
 

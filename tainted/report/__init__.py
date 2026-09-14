@@ -4,6 +4,20 @@ The data model here is shared. Each surface (the website, a PR comment, the CLI)
 it its own way.
 """
 
-from tainted.report.model import CoverageNote, Report, ReportSummary, build_report
+from tainted.report.model import (
+    CoverageNote,
+    Report,
+    ReportSummary,
+    build_report,
+    published_order,
+    select_candidate,
+)
 
-__all__ = ["Report", "ReportSummary", "CoverageNote", "build_report"]
+__all__ = [
+    "Report",
+    "ReportSummary",
+    "CoverageNote",
+    "build_report",
+    "published_order",
+    "select_candidate",
+]

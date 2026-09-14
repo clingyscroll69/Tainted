@@ -14,8 +14,8 @@ from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target  # noqa: F401
 from tainted.llm.gemini import get_default_client
 from tainted.models import Check, FindingStatus, Severity
-from tainted.report import build_report
-from tainted_cli.render import console, render_report, render_reverification
+from tainted.report import build_report, select_candidate
+from tainted_cli.render import _e, console, render_report, render_reverification
 
 app = typer.Typer(
     add_completion=False,
@@ -111,7 +111,7 @@ def prove(
             autodiscover=autodiscover,
         )
     except PermissionError as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[red]{_e(exc)}[/red]")
         raise typer.Exit(code=2)
 
     render_report(build_report(result, findings))
@@ -125,7 +125,14 @@ def prove(
 @app.command()
 def fix(
     repo: Path = typer.Argument(..., exists=True, file_okay=False),
-    index: int = typer.Option(0, help="Index of the possible hole to fix, in the order `analyze` lists them"),
+    finding_id: Optional[str] = typer.Option(
+        None,
+        "--finding-id",
+        help="The ID column from `analyze`. Names the hole itself, so it cannot drift.",
+    ),
+    index: int = typer.Option(
+        0, help="The # column from `analyze`. Only meaningful for that exact run."
+    ),
     apply: bool = typer.Option(False, help="Write the fix to disk instead of just printing the diff"),
     url: Optional[str] = typer.Option(
         None,
@@ -147,14 +154,16 @@ def fix(
 
     llm = _llm_or_none()
     result = core_analyze(str(repo), llm=llm)
-    candidates = result.ranked()
-    if index >= len(candidates):
-        console.print(f"[red]No possible hole at index {index}. Found {len(candidates)}.[/red]")
+    # Addressed through the engine's own helper, so the row `analyze` drew and the candidate
+    # fixed here are the same candidate. Selecting from `ranked()` while the table rendered
+    # `build_report`'s order meant they were routinely not.
+    try:
+        candidate = select_candidate(result, finding_id=finding_id, index=index)
+    except LookupError as exc:
+        console.print(f"[red]{_e(exc)}[/red]")
         raise typer.Exit(code=2)
-
-    candidate = candidates[index]
     finding = Finding(candidate=candidate)
-    console.print(f"[bold]Fixing:[/bold] {candidate.title}\n")
+    console.print(f"[bold]Fixing:[/bold] {_e(candidate.title)} [dim]({_e(candidate.id)})[/dim]\n")
 
     # The tool plane fix can't be decided from code alone. Ask the user first.
     answers = None
@@ -175,19 +184,25 @@ def fix(
             repo_path=str(repo) if candidate.check is Check.AGENT_INJECTION else None,
         )
     except (ValueError, NotImplementedError) as exc:
-        console.print(f"[red]{exc}[/red]")
+        console.print(f"[red]{_e(exc)}[/red]")
         raise typer.Exit(code=2)
 
+    # The patch is the product, so it leaves here byte for byte. Two things would otherwise
+    # edit it on the way out: rich reads anything in square brackets as a style tag and deletes
+    # it (`[id]` in a Next route, an array index, a SQL placeholder), and it re-wraps long lines
+    # at the terminal width, which breaks a path in half. `_e` stops the first, `soft_wrap` the
+    # second. A diff a reader copies off the terminal must be the bytes `--apply` writes.
     for edit in result_fix.edits:
-        console.print(f"[bold]--- {edit.file}[/bold]\n{edit.replacement}")
-    console.print(f"[dim]{result_fix.notes}[/dim]")
+        console.print(f"[bold]--- {_e(edit.file)}[/bold]", soft_wrap=True)
+        console.print(_e(edit.replacement), soft_wrap=True)
+    console.print(f"[dim]{_e(result_fix.notes)}[/dim]")
 
     if apply:
         for edit in result_fix.edits:
             path = repo / edit.file
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(edit.replacement, encoding="utf-8")
-            console.print(f"[green]wrote {path}[/green]")
+            console.print(f"[green]wrote {_e(path)}[/green]", soft_wrap=True)
 
     if result_fix.assertions:
         render_reverification(result_fix)

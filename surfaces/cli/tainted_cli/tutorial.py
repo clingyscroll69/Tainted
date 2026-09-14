@@ -169,10 +169,10 @@ LESSONS: list[dict] = [
         "summary": "Run tainted fix to interview you about the fix, write the code, and re-prove the hole is closed.",
         "steps": [
             {
-                "heading": "Select the hole to fix by index",
-                "body": "Run tainted fix with the index of the candidate in the order analyze lists them. Index 0 is the first candidate. Tainted shows you the title of the candidate and asks questions about how to fix it.",
-                "command": "tainted fix ./my-app --index 0",
-                "expect": "Tainted prints the title of the candidate. For some checks like agent_injection, it asks questions. For others like bola, it writes the fix immediately and shows the diff.",
+                "heading": "Name the hole you want fixed",
+                "body": "Every row analyze prints carries two handles: a # on the left and an ID next to it. Pass the ID with --finding-id and you have named the hole itself, so the same command still means the same hole after you edit the code. Pass the number with --index and you have named a position in that one report, which moves the moment anything else does. Prefer the ID; the number is there because a numbered table invites you to type the number.",
+                "command": "tainted fix ./my-app --finding-id 1db5cbc5350811b5",
+                "expect": "Tainted prints the title of the candidate and its ID. For some checks like agent_injection, it asks questions. For others like bola, it writes the fix immediately and shows the diff.",
             },
             {
                 "heading": "Answer the interview questions",
@@ -185,12 +185,12 @@ LESSONS: list[dict] = [
             {
                 "heading": "Apply the fix with --apply",
                 "body": "By default, fix only shows the diff. Add --apply to write the fix to disk. Tainted writes the file and prints the path. The file is now changed in your working tree. Do not run fix again with --apply unless you want to overwrite it.",
-                "command": "tainted fix ./my-app --index 0 --apply",
+                "command": "tainted fix ./my-app --finding-id 1db5cbc5350811b5 --apply",
             },
             {
                 "heading": "Re-prove the hole is closed",
                 "body": "To verify the fix actually stops the attack, give fix a running target with --url and credentials: --login-a and --login-b. Tainted re-runs the attack after writing the fix. It then shows Re-verification with two assertions: FIXED means the attack failed and the real owner still has access. BROKE IT SAFELY means the attack failed but you also accidentally locked out the owner, which is a mistake. NOT FIXED means the attack still works, and the fix did not help.",
-                "command": "tainted fix ./my-app --index 0 --apply --url http://localhost:3000 --login-a a@test.com:password --login-b b@test.com:password",
+                "command": "tainted fix ./my-app --finding-id 1db5cbc5350811b5 --apply --url http://localhost:3000 --login-a a@test.com:password --login-b b@test.com:password",
             },
             {
                 "heading": "Handle test failure",

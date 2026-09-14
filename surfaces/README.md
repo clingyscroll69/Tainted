@@ -10,10 +10,19 @@ A deployable repo for one surface = **the core** + **that surface's folder**:
 
 ```
 your-deploy-repo/
-├── tainted/            # the core engine package  (copy verbatim)
-├── pyproject.toml      # the core package manifest (copy verbatim)
-└── surfaces/<name>/    # exactly one surface folder
+├── tainted/                  # the core engine package  (copy verbatim)
+├── pyproject.toml            # the core package manifest (copy verbatim)
+├── action.yml                # CLI surface: omit. CI surface: required, and at the ROOT
+├── .pre-commit-hooks.yaml    # CLI surface: required, and at the ROOT. Others: omit
+└── surfaces/<name>/          # exactly one surface folder
 ```
+
+Two files sit at the root rather than inside a surface folder, and neither is a style choice:
+GitHub finds an action only as `action.yml` at a repository root, and pre-commit finds a hook
+only as `.pre-commit-hooks.yaml` at one. Kept under `surfaces/`, both were unreachable — and in
+the action's case unbuildable too, since a Docker action's build context is the directory
+holding its manifest, and this one needs the repo root to copy the engine from.
+`tests/test_action_contract.py` and `surfaces/cli/tests/test_hook_contract.py` keep them there.
 
 Nothing else is required, and no surface imports another. Each surface folder has its
 own `pyproject.toml` (that surface's own dependencies), its own entry point, its
@@ -40,6 +49,8 @@ folder and runs those two installs.
 | `ci/` | CI — where proof happens | `analyze` + `prove` + `fix`-as-PR | GitHub Actions / GitLab CI |
 | `mcp/` | The agent (MCP) | sync `analyze` tools, async `prove` job, interactive `fix` | stdio / SSE MCP server |
 | `website/` | The demonstration (FastAPI) | `analyze` + `prove` + patch download | long-lived container |
+
+**Publishing any of them: `PUBLISHING.md`** — one section per surface, plus the tag that does all four.
 
 Only **CI** reliably has a running app to attack, so it's the surface where
 `prove` runs by default. The **CLI** and **website** work fine with no target: the CLI
