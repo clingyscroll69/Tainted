@@ -15,8 +15,8 @@ window.TAINTED_TOUR = {
     {
       anchor: 'setup',
       title: 'Give Tainted your code',
-      body: 'Type a path to a local repo, or sign in with GitHub to pick a repo you actually own. The backend fetches it only through your token, so private repos stay private. Local paths work too, as a dev fallback.',
-      note: 'Analyze is static and read-only; no secrets leave your machine.'
+      body: 'There is nowhere to type a repository name, on purpose. Sign in with GitHub and Tainted lists the repos your own token can reach, then fetches the one you pick for the length of a single request. Choose before you sign in whether that list covers your public repos only, or your private ones too — public only is the default, and it is the narrower thing to hand a scanner.',
+      note: 'Analyze is static and read-only. Tainted never writes to your repo; the fix comes back as a patch.'
     },
     {
       anchor: 'scan',

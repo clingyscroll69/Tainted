@@ -72,16 +72,36 @@ are each a deployment decision rather than a preference:
 
 `PUBLISHING.md` §5 has the full `docker run`, and what each variable costs to get wrong.
 
-## Sign in with GitHub
+## Two ways to name code, and no third
 
-Instead of typing a filesystem path, a visitor can **sign in with GitHub** and pick a
-repo they actually have access to, private repos included. This adds a check a public
-link can't: the backend only ever fetches a repo the caller's own token can
-see. A selected repo is pulled server-side through the GitHub **tarball API** (no
-`git`, no lasting clone) into a temp directory for the length of one request, then
-deleted. The OAuth token rides in an http-only cookie **sealed** with a key only this
-deployment holds — the browser cannot read it, and nothing is written to disk. The local
-path still works too, as a dev fallback.
+The page offers the **demonstration** and a **repository picked from GitHub**. There is no
+field for typing a repository name or a filesystem path, deliberately: a name you type is a
+name you may not be able to read, and the picker cannot produce one GitHub did not just hand
+us. The token is the authorization rather than the honour system.
+
+So a visitor **signs in with GitHub**, and Tainted lists the repositories their own token can
+reach. A selected repo is pulled server-side through the GitHub **tarball API** (no `git`, no
+lasting clone) into a temp directory for the length of one request, then deleted. The OAuth
+token rides in an http-only cookie **sealed** with a key only this deployment holds — the
+browser cannot read it, and nothing is written to disk.
+
+`repo_path` survives in the API as the local-mode entry point that `curl` and this surface's
+test suite use. It is refused off a developer's own machine and no UI renders a control for
+it.
+
+### How much access to ask for
+
+Sign-in comes in two strengths, and the visitor chooses **before** the redirect, because
+after it there is only GitHub's consent screen:
+
+| Choice | Scope | What it reaches |
+| --- | --- | --- |
+| **Public only** (default) | `read:user` | Public repositories. A private one cannot be listed *or* fetched — GitHub enforces that, not this code. |
+| **Public and private** | `repo` | Everything the account can reach. `repo` is the only scope GitHub has that opens a private repository, and it is read **and** write. Tainted never writes: the fix comes back as a patch. |
+
+What the session records is what GitHub **granted**, read off the token response — not what
+was asked for. A visitor who declines private on the consent screen gets a public session and
+the page says so, instead of offering a repository the token would be refused at.
 
 One-time setup — register an [OAuth App](https://github.com/settings/developers)
 (or an org one):
@@ -95,12 +115,15 @@ One-time setup — register an [OAuth App](https://github.com/settings/developer
 export GITHUB_CLIENT_ID=...      # from the OAuth App
 export GITHUB_CLIENT_SECRET=...
 export TAINTED_TOKEN_SECRET=...  # long random string; required on any hosted deployment
-# optional: export GITHUB_SCOPES="repo read:user"  (default; drop `repo` for public-only)
+# optional: export GITHUB_SCOPES="read:user"
+#   Pins the scope for every sign-in, whatever the visitor chose. Unset by default — a
+#   default here would win over the choice above and make it decorative. Set it only to
+#   *narrow* what this deployment may ever ask for.
 tainted-web
 ```
 
-Without the OAuth variables set, sign-in is turned off and the button says so. The
-local-path demo still runs.
+Without the OAuth variables set, sign-in is turned off and the page says so. The
+demonstration still runs — and it is then the only thing that does.
 
 ### `TAINTED_TOKEN_SECRET`, and why it is not optional in production
 
@@ -127,14 +150,17 @@ invalidate a copy taken beforehand; the session lifetime is 8 hours for that rea
 
 ## API
 
-- `GET  /api/auth/status` — `{configured, authenticated, login}` for the frontend
-- `GET  /api/auth/github/login` — 302 to GitHub (503 if unconfigured)
-- `GET  /api/auth/github/callback` — exchanges the code for a token, sets the
-  session cookie, redirects to `/`
+- `GET  /api/auth/status` — `{configured, authenticated, login, access, local_paths}`
+  for the frontend; `access` is `"public"` / `"private"` / `null`
+- `GET  /api/auth/github/login?access=public|private` — 302 to GitHub, asking for that
+  much (503 if unconfigured; anything but `private` means public)
+- `GET  /api/auth/github/callback` — exchanges the code for a token, records the scopes
+  GitHub granted, sets the session cookie, redirects to `/`
 - `POST /api/auth/logout` — clears the session
-- `GET  /api/repos` — repos the signed-in user can reach (401 without a session)
-- `POST /api/analyze` — `{repo}` + `{ref?}` (GitHub) **or** `{repo_path}` (local)
-  → report JSON
+- `GET  /api/repos` — `{repos, access}`: every repository the session may pick, scoped
+  to what it was granted (401 without a session)
+- `POST /api/analyze` — `{repo}` + `{ref?}` (GitHub) **or** `{repo_path}` (local mode
+  only, no UI) → report JSON
 - `POST /api/prove` — the first-run form (same repo selectors) → report JSON
   (gated by an ownership check once the target isn't localhost)
 - `POST /api/fix` — repo selector + `{index}` → a patch (edits) to download

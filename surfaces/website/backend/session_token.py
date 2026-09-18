@@ -45,6 +45,7 @@ from typing import Optional
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from backend import github as github_access
 from backend import keys
 
 PREFIX = "ts1"
@@ -72,6 +73,14 @@ class Session:
     login: str
     created: float
     expires: float
+    # "public" or "private": how far the grant behind `token` reaches, as GitHub reported it at
+    # sign-in. Sealed alongside the token because it is a property *of* the token — a session
+    # that forgot it would have to ask GitHub again on every request, or guess.
+    access: str = github_access.ACCESS_PRIVATE
+
+    @property
+    def includes_private(self) -> bool:
+        return self.access == github_access.ACCESS_PRIVATE
 
 
 def _local_mode() -> bool:
@@ -92,8 +101,18 @@ def available() -> bool:
     return _key() is not None
 
 
-def seal(token: str, login: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
-    """Mint the cookie value for a freshly signed-in caller."""
+def seal(
+    token: str,
+    login: str,
+    ttl_seconds: int = DEFAULT_TTL_SECONDS,
+    access: str = github_access.ACCESS_PRIVATE,
+) -> str:
+    """Mint the cookie value for a freshly signed-in caller.
+
+    ``access`` defaults to the wider of the two because that is what a session that does not
+    say is: every cookie minted before this field existed was sealed around a `repo`-scoped
+    token. Claiming less for those would hide repositories the holder really can read.
+    """
     key = _key()
     if key is None:
         raise SessionSecretMissing(
@@ -103,7 +122,7 @@ def seal(token: str, login: str, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> str:
         )
     now = time.time()
     payload = json.dumps(
-        {"t": token, "l": login, "c": int(now), "e": int(now + ttl_seconds)},
+        {"t": token, "l": login, "c": int(now), "e": int(now + ttl_seconds), "a": access},
         separators=(",", ":"),
     ).encode("utf-8")
     nonce = secrets.token_bytes(_NONCE_BYTES)
@@ -138,6 +157,9 @@ def unseal(cookie: Optional[str]) -> Optional[Session]:
             login=str(data["l"]),
             created=float(data["c"]),
             expires=float(data["e"]),
+            # `.get`, not `[...]`: a cookie sealed before this field existed is still a valid
+            # session, and it held a `repo`-scoped token. Absent means private, not broken.
+            access=str(data.get("a") or github_access.ACCESS_PRIVATE),
         )
     except (InvalidTag, ValueError, TypeError, KeyError):
         return None

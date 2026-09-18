@@ -103,7 +103,13 @@ FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 # Request models (the first-run form), and what a repository may be called
 #
 # A request names its repo one of two ways: `repo` (a GitHub "owner/name" the signed-in user can
-# reach — fetched server-side, private included) or `repo_path` (a local path, the dev fallback).
+# reach — fetched server-side) or `repo_path` (a local path, local mode only).
+#
+# Only the first of those is reachable from the page. The website offers exactly two ways to
+# name code — the built-in demonstration, and a repository picked from the list GitHub returns
+# for the signed-in caller — and no text field for either. `repo_path` survives as the API's
+# local-mode entry point, used by `curl` and by this surface's own test suite; it is refused
+# off a developer's own machine and no UI renders a control for it.
 #
 # `repo` and `ref` are pasted into a GitHub API path (`/repos/{repo}/tarball/{ref}`). Left
 # unvalidated, a `..` segment normalises the URL onto a different endpoint entirely —
@@ -144,7 +150,8 @@ class RepoSelector(BaseModel):
     """The two ways a request names the code to analyse.
 
     Every endpoint that takes a repository inherits this, so the validation above happens once
-    and cannot be forgotten on a new route.
+    and cannot be forgotten on a new route. `repo` is what the page sends; `repo_path` is the
+    local-mode-only API affordance described above.
     """
 
     repo_path: Optional[str] = None
@@ -238,24 +245,45 @@ def auth_status(request: Request):
         "authenticated": session is not None,
         "login": session.login if session else None,
         "reason": _sign_in_unavailable_reason(),
-        # Whether a filesystem path is a usable way to name a repository here. It is the dev
-        # fallback, refused by any deployment that is not the developer's own machine — and a
-        # page that renders the field anyway is offering the one input the server will refuse.
-        # With sign-in unconfigured *and* this false, the demo is all this deployment can do,
-        # and saying so is better than a form that 403s.
+        # How far this session's GitHub grant reaches: "public" or "private". The page shows it
+        # next to the login, because a visitor who chose public-only and then cannot find a
+        # private repository in the picker deserves to be told which of the two is happening.
+        # None when nobody is signed in — there is no grant to describe.
+        "access": session.access if session else None,
+        # Whether a filesystem path is a usable way to name a repository here. Nothing in the
+        # UI renders one any more — the page offers the demonstration and the GitHub picker and
+        # nothing else — so this describes the *API* only: `repo_path` is the local-mode entry
+        # point that `curl` and the test suite use, and it stays refused everywhere else.
+        # With sign-in unconfigured, the demo is all this deployment can do, and the page says
+        # so rather than presenting a form that 403s.
         "local_paths": _local_mode(),
     }
 
 
 @app.get("/api/auth/github/login")
-def auth_login(request: Request):
+def auth_login(request: Request, access: str = github.ACCESS_PUBLIC):
+    """Start sign-in. `access=private` asks for private repositories; anything else does not.
+
+    The choice is the visitor's and it is made here, before the redirect, because after the
+    redirect it is GitHub's consent screen and there is no going back to ask. Unrecognised
+    values fall to public rather than erroring: this is a query string on a link, and the safe
+    reading of a typo is the narrower grant.
+    """
     # Checked before the redirect, not after it: a caller who has already approved the app at
     # GitHub and comes back to a 503 has handed out access for nothing.
     reason = _sign_in_unavailable_reason()
     if reason:
         raise HTTPException(503, reason)
-    state = secrets.token_urlsafe(24)
-    url = github.authorize_url(_oauth, state, _redirect_uri(request))
+    include_private = access.strip().lower() == github.ACCESS_PRIVATE
+    # The state carries the requested access through the round trip, prefixed onto the random
+    # half rather than kept in a second cookie. It is only a fallback — the callback prefers
+    # what GitHub says it granted — so it needs to survive the trip, not to be trusted. The
+    # CSRF property is unchanged: the random half is still 24 bytes and the whole string is
+    # still compared against the cookie.
+    state = f"{github.ACCESS_PRIVATE if include_private else github.ACCESS_PUBLIC}.{secrets.token_urlsafe(24)}"
+    url = github.authorize_url(
+        _oauth, state, _redirect_uri(request), include_private=include_private
+    )
     resp = RedirectResponse(url, status_code=302)
     resp.set_cookie(
         STATE_COOKIE, state, httponly=True, max_age=600, samesite="lax",
@@ -274,12 +302,20 @@ def auth_callback(request: Request, code: str = "", state: str = "", error: str 
     if not code:
         raise HTTPException(400, "missing authorization code")
     try:
-        token = github.exchange_code(_oauth, code, _redirect_uri(request))
-        user = github.get_user(token)
+        grant = github.exchange_code(_oauth, code, _redirect_uri(request))
+        user = github.get_user(grant.token)
     except github.GitHubError as exc:
         return RedirectResponse(f"/?auth_error={exc}", status_code=302)
+    # What was *granted*, with what was asked for as the fallback for the one case GitHub
+    # leaves blank. A visitor who asked for private and then unticked it on the consent screen
+    # gets a public session, and the page says so, rather than offering a private repository
+    # the token would be refused at.
+    requested, _, _ = state.partition(".")
+    access = grant.access if grant.scopes else (
+        github.ACCESS_PRIVATE if requested == github.ACCESS_PRIVATE else github.ACCESS_PUBLIC
+    )
     try:
-        sealed = session_token.seal(token, user.get("login", ""))
+        sealed = session_token.seal(grant.token, user.get("login", ""), access=access)
     except session_token.SessionSecretMissing as exc:
         return RedirectResponse(f"/?auth_error={exc}", status_code=302)
     resp = RedirectResponse("/", status_code=302)
@@ -349,11 +385,18 @@ def api_ownership_token(request: Request, url: str = ""):
 
 @app.get("/api/repos")
 def api_repos(request: Request):
+    """Every repository this caller may pick — which is the only way to name one here.
+
+    The website has no field for typing a repository name, so this list *is* the choice on
+    offer. It is scoped to what the session was granted: a public-only sign-in never sees a
+    private repository listed, and could not fetch one if it did.
+    """
     session = _require_session(request)
     try:
-        return {"repos": github.list_repos(session.token)}
+        repos = github.list_repos(session.token, include_private=session.includes_private)
     except github.GitHubError as exc:
         raise HTTPException(502, str(exc))
+    return {"repos": repos, "access": session.access}
 
 
 # --------------------------------------------------------------------------- #
@@ -779,8 +822,8 @@ def deployment_warnings() -> list[str]:
     if not _oauth.configured:
         out.append(
             "GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET are not set. Nobody can sign in, and "
-            "without sign-in there is no way to name a repository: filesystem paths are "
-            "refused off a developer's own machine. The demo still works."
+            "signing in is the only way to name a repository: the page has no field for one, "
+            "and `repo_path` is refused off a developer's own machine. The demo still works."
         )
     elif not _oauth.redirect_override:
         out.append(
@@ -993,6 +1036,12 @@ def _checkout(req, request: Request) -> Iterator[str]:
 
     `repo` (a GitHub owner/name) is fetched server-side using the signed-in user's token;
     otherwise `repo_path` is used as a local directory. Exactly one must be provided.
+
+    The token is the authorization, and that is the whole reason no repository allow-list is
+    checked here: the page only ever offers repositories GitHub listed for this caller, and a
+    caller who posts some other name gets whatever their own token can fetch, which is nothing
+    they could not already read. A public-only session cannot reach a private repository by
+    naming one, because GitHub refuses the tarball.
     """
     repo = getattr(req, "repo", None)
     if repo:

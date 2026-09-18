@@ -1,13 +1,15 @@
 """The page must never offer an input this deployment will refuse.
 
-Three shapes exist, and only one of them was handled well. On a hosted deployment with no
-GitHub OAuth configured, the sign-in box hid itself, the filesystem-path field stayed as the
+Three shapes used to exist, and only one of them was handled well. On a hosted deployment with
+no GitHub OAuth configured, the sign-in box hid itself, the filesystem-path field stayed as the
 only visible input, and submitting it answered *"Sign in with GitHub and pick a repository"* —
 naming a control that was not on the page. The demo was the only thing that worked, and nothing
 said so.
 
-`/api/auth/status` now reports whether filesystem paths are accepted, so the form can match the
-deployment it is in rather than guessing.
+The path field is gone entirely now, which collapses three shapes into two: sign-in configured,
+or the demonstration alone. `/api/auth/status` still reports `local_paths`, because `repo_path`
+survives as the API's local-mode entry point — but no UI renders a control for it, so the page
+decides what to show from `configured` and nothing else.
 """
 
 from __future__ import annotations
@@ -44,8 +46,7 @@ def test_status_reports_whether_local_paths_are_usable(hosted_no_oauth):
     body = client.get("/api/auth/status").json()
     assert body["configured"] is False
     assert body["local_paths"] is False, (
-        "the frontend decides whether to render the path field from this; "
-        "without it the page can only guess"
+        "`repo_path` is refused off a developer's own machine, and the API says so here"
     )
     assert body["reason"]
 
@@ -58,14 +59,40 @@ def test_status_reports_local_paths_on_a_developer_machine(local_dev):
 # --------------------------------------------------------------------------- #
 # The page carries the machinery to act on it
 # --------------------------------------------------------------------------- #
-def test_the_form_can_hide_the_path_field_and_explain_itself():
-    html = (client.get("/").text)
-    assert 'id="repowrap"' in html, "the path field needs a handle to be hidden by"
-    assert 'id="demoonly"' in html, "there must be something to show in its place"
+def test_the_form_can_explain_a_deployment_that_only_demonstrates():
+    html = client.get("/").text
+    assert 'id="demoonly"' in html, "there must be something to show in place of the picker"
     assert "applyDeploymentShape" in html
     # The explanation names what is missing, so a reader can act or ask someone who can.
     assert "GITHUB_CLIENT_ID" in html
     assert "runs the demonstration only" in html.lower()
+
+
+def test_there_is_no_way_to_type_a_repository_name():
+    """The only two ways to name code are the demonstration and the GitHub picker.
+
+    A free-text repository field is a way to name something you may not be able to read, and
+    on this surface it was also the filesystem-path field — an arbitrary-directory read
+    wherever local mode was on. Both are gone: what is left is a `<select>` filled from the
+    caller's own token, and one button for the demo.
+    """
+    html = client.get("/").text
+    assert 'id="f-repo"' not in html, "the free-text repository/path field is gone"
+    assert 'id="repowrap"' not in html
+    assert 'id="f-gh-repo"' in html, "the picker is the only way to name a repository"
+    assert 'id="loaddemo"' in html, "and the demonstration is the other way"
+    # Nothing in the form may post a filesystem path any more.
+    assert "repo_path" not in html
+
+
+def test_the_sign_in_offers_a_choice_of_reach():
+    """Private access is asked for only when the visitor says so."""
+    html = client.get("/").text
+    assert 'id="ghscope"' in html
+    assert 'value="public" checked' in html, "the narrow grant is the default"
+    assert 'value="private"' in html
+    # The page says what each one costs, in GitHub's own words.
+    assert "read:user" in html and "<code>repo</code>" in html
 
 
 def test_the_demo_route_stays_available_in_every_shape(hosted_no_oauth):

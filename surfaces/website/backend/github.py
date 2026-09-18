@@ -1,12 +1,28 @@
 """GitHub OAuth + repo access for the website surface.
 
-Turns the demo's repo input from a local path into a *verified* GitHub identity: sign in with
-GitHub, pick a repo you actually have access to (private included), and Tainted fetches that repo
-server-side to analyze. This lives in the website surface only — the CLI works a local tree, CI
-works its checkout, MCP works the client's filesystem; only the hosted demo needs to prove the
-caller is allowed to see the code it scans.
+This is how the website names code to analyse. There is no other way and no text field: a
+visitor either runs the built-in demonstration, or signs in with GitHub and picks a repository
+Tainted then *detects* on their behalf. Nobody types a repository name, so nobody can name one
+they cannot read — the list comes from their own token, and the token is the authorization.
+This lives in the website surface only — the CLI works a local tree, CI works its checkout, MCP
+works the client's filesystem; only the hosted demo needs to prove the caller is allowed to see
+the code it scans.
 
-Two deliberate choices keep this cheap and safe to run:
+**How much access to ask for is the visitor's choice, made before the redirect.** Asking every
+signer-in for `repo` — read *and write* on every private repository they can reach — to run a
+read-only scan is more than the job needs, and it is the kind of consent screen people back out
+of. So sign-in comes in two strengths:
+
+* **public only** (`read:user`) — the default. The token cannot open a private repository at
+  all; GitHub enforces that, not this code.
+* **private included** (`repo`) — asked for only when the visitor says so, because it is the
+  only scope GitHub offers that can read a private repository's tarball.
+
+What lands in the session is what GitHub **granted**, read back off the token response, not
+what we asked for. A visitor can narrow the grant on the consent screen and an org can narrow
+it further, so the request is a wish and the response is the fact.
+
+Two more deliberate choices keep this cheap and safe to run:
 
 * **No git binary, no persistent clone.** A selected repo is fetched via the GitHub tarball API
   with the user's token and extracted into a temp dir for the life of one request, then removed.
@@ -31,7 +47,35 @@ import httpx
 AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 TOKEN_URL = "https://github.com/login/oauth/access_token"
 API = "https://api.github.com"
-DEFAULT_SCOPES = "repo read:user"
+
+# The two strengths of sign-in, and the whole difference between them.
+#
+# `read:user` is what the page needs to say "signed in as <you>" and to list public
+# repositories; it cannot open a private one. `repo` is the only scope GitHub has that can, and
+# it is coarse — read *and* write, every private repository the account can reach, no way to
+# ask for less. Tainted never writes (the website hands back a patch; it has no working tree),
+# but it cannot ask for a token that only reads. So the honest thing is to make the visitor
+# choose, default to the narrow one, and say plainly what the wide one carries.
+PUBLIC_SCOPES = "read:user"
+PRIVATE_SCOPES = "repo read:user"
+DEFAULT_SCOPES = PUBLIC_SCOPES
+
+# What a session records about its own reach. Derived from the *granted* scope, never from the
+# one requested — see `access_for_scopes`.
+ACCESS_PUBLIC = "public"
+ACCESS_PRIVATE = "private"
+
+
+def access_for_scopes(granted: str) -> str:
+    """Which access level a granted scope string actually amounts to.
+
+    GitHub returns the scopes it issued on the token response, comma-separated. A visitor can
+    narrow the grant on the consent screen and an org can narrow it further, so this reads the
+    answer rather than assuming the question was honoured. `repo` is the only scope that opens
+    a private repository, so it is the only one that counts here.
+    """
+    scopes = {s.strip() for s in (granted or "").replace(" ", ",").split(",") if s.strip()}
+    return ACCESS_PRIVATE if "repo" in scopes else ACCESS_PUBLIC
 
 
 class GitHubNotConfigured(RuntimeError):
@@ -62,7 +106,11 @@ def _auth_headers(token: str) -> dict:
 class OAuthConfig:
     client_id: Optional[str] = field(default_factory=lambda: _env("GITHUB_CLIENT_ID"))
     client_secret: Optional[str] = field(default_factory=lambda: _env("GITHUB_CLIENT_SECRET"))
-    scopes: str = field(default_factory=lambda: _env("GITHUB_SCOPES") or DEFAULT_SCOPES)
+    # An operator override that pins the scope string for every sign-in, whatever the visitor
+    # chose. Unset by default — and it has to be, because a default here would silently win
+    # over the public/private choice and make the choice decorative. Set it only to *narrow*
+    # what this deployment may ever ask for.
+    scopes: Optional[str] = field(default_factory=lambda: _env("GITHUB_SCOPES"))
     # Set GITHUB_OAUTH_REDIRECT when the public callback URL differs from the request's own
     # base URL (behind a proxy / custom domain). Otherwise it is derived per-request.
     redirect_override: Optional[str] = field(default_factory=lambda: _env("GITHUB_OAUTH_REDIRECT"))
@@ -70,6 +118,12 @@ class OAuthConfig:
     @property
     def configured(self) -> bool:
         return bool(self.client_id and self.client_secret)
+
+    def scopes_for(self, include_private: bool) -> str:
+        """The scope string one sign-in should ask for."""
+        if self.scopes:
+            return self.scopes
+        return PRIVATE_SCOPES if include_private else PUBLIC_SCOPES
 
 
 def load_config() -> OAuthConfig:
@@ -79,7 +133,10 @@ def load_config() -> OAuthConfig:
 # --------------------------------------------------------------------------- #
 # OAuth flow
 # --------------------------------------------------------------------------- #
-def authorize_url(cfg: OAuthConfig, state: str, redirect_uri: str) -> str:
+def authorize_url(
+    cfg: OAuthConfig, state: str, redirect_uri: str, *, include_private: bool = False
+) -> str:
+    """Where to send a visitor to sign in. ``include_private`` picks which scope to ask for."""
     if not cfg.configured:
         raise GitHubNotConfigured(
             "GitHub OAuth is not configured. Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET."
@@ -88,7 +145,7 @@ def authorize_url(cfg: OAuthConfig, state: str, redirect_uri: str) -> str:
         {
             "client_id": cfg.client_id,
             "redirect_uri": redirect_uri,
-            "scope": cfg.scopes,
+            "scope": cfg.scopes_for(include_private),
             "state": state,
             "allow_signup": "false",
         }
@@ -96,8 +153,27 @@ def authorize_url(cfg: OAuthConfig, state: str, redirect_uri: str) -> str:
     return f"{AUTHORIZE_URL}?{query}"
 
 
-def exchange_code(cfg: OAuthConfig, code: str, redirect_uri: str) -> str:
-    """Trade the callback ``code`` for an access token."""
+@dataclass(frozen=True)
+class Grant:
+    """A token and the scopes GitHub actually issued with it.
+
+    The pair travels together because the scope is not a detail about the token, it *is* what
+    the token can do — and it is the only trustworthy answer to "may this session see private
+    repositories". Asking for `repo` and receiving `read:user` is a normal outcome (the visitor
+    declined on the consent screen), and a session that recorded the request instead of the
+    response would then offer a private repository it cannot fetch.
+    """
+
+    token: str
+    scopes: str
+
+    @property
+    def access(self) -> str:
+        return access_for_scopes(self.scopes)
+
+
+def exchange_code(cfg: OAuthConfig, code: str, redirect_uri: str) -> Grant:
+    """Trade the callback ``code`` for an access token and the scopes it carries."""
     if not cfg.configured:
         raise GitHubNotConfigured("GitHub OAuth is not configured.")
     try:
@@ -119,7 +195,10 @@ def exchange_code(cfg: OAuthConfig, code: str, redirect_uri: str) -> str:
     token = data.get("access_token")
     if not token:
         raise GitHubError(data.get("error_description") or "no access_token in response")
-    return token
+    # An empty `scope` is GitHub saying "no scopes", which is the narrow grant, not an unknown
+    # one. Reading it as unknown and defaulting to private would hand the session a reach it
+    # was never given.
+    return Grant(token=token, scopes=str(data.get("scope") or ""))
 
 
 def get_user(token: str) -> dict:
@@ -131,8 +210,18 @@ def get_user(token: str) -> dict:
         raise GitHubError(f"could not read user: {exc}") from exc
 
 
-def list_repos(token: str, *, max_pages: int = 10) -> list[dict]:
-    """Repos the user can reach (owned, collaborator, org member), most-recently-updated first."""
+def list_repos(token: str, *, include_private: bool = True, max_pages: int = 10) -> list[dict]:
+    """Repos the user can reach (owned, collaborator, org member), most-recently-updated first.
+
+    This *is* the repository picker: the website offers no way to name a repository by hand, so
+    whatever comes back here is the entire set a visitor can choose from.
+
+    ``include_private`` is belt and braces, and worth being clear about which half does the
+    work. The real boundary is the token — a `read:user` token cannot read a private repository
+    or its tarball, and GitHub is what enforces that. This parameter only makes the *list*
+    agree with the grant, so a session that chose public-only is never shown a private
+    repository it would then be refused when it picked one.
+    """
     out: list[dict] = []
     page = 1
     while page <= max_pages:
@@ -145,6 +234,7 @@ def list_repos(token: str, *, max_pages: int = 10) -> list[dict]:
                     "page": page,
                     "sort": "updated",
                     "affiliation": "owner,collaborator,organization_member",
+                    "visibility": "all" if include_private else "public",
                 },
                 timeout=20,
             )

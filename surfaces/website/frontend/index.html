@@ -503,7 +503,7 @@ h1,h2,h3,p{margin:0}
 .demo-load{width:100%;justify-content:center;margin-top:-2px}
 .demo-load code{font-family:var(--ff-data);font-size:0.75rem}
 
-/* ---- the first-run form: a repository, then the few things `prove` needs ---- */
+/* ---- the first-run form: choose a repository, then the few things `prove` needs ---- */
 .setup{padding:15px 18px;display:flex;flex-direction:column;gap:10px}
 .setup label{display:flex;flex-direction:column;gap:4px;font-size:0.75rem;
   letter-spacing:.06em;text-transform:uppercase;color:var(--wash-dim)}
@@ -573,12 +573,32 @@ h1,h2,h3,p{margin:0}
 @media (hover:hover) and (pointer:fine){
   .linkbtn:hover{color:var(--snow)}
 }
-/* This rule carries a word ("or"), naming the choice on offer, not just decoration. */
-.gh-or{
-  display:flex;align-items:center;gap:12px;margin:2px 0 0;
-  font-size:0.75rem;letter-spacing:.06em;text-transform:uppercase;color:var(--wash-dim);
-}
-.gh-or::before,.gh-or::after{content:"";flex:1;height:1px;background:var(--rule)}
+/* ---- how much access to ask for ----
+   A consent decision, so it is laid out as one: two whole statements to read and choose
+   between, not a checkbox with a word beside it. The radio stays a real radio — it is the
+   control browsers and screen readers already know how to say "one of two" with. */
+.gh-scope{border:1px solid var(--rule-soft);border-radius:3px;padding:11px 12px 12px;margin:0;
+  display:flex;flex-direction:column;gap:9px}
+.gh-scope legend{padding:0 5px;margin-left:-5px;font-size:0.75rem;color:var(--wash-dim)}
+/* `.setup label` sets the uppercase caption treatment every other field in this form wants;
+   these labels are sentences, so they take it back off. */
+.gh-scope label{display:grid;grid-template-columns:auto 1fr;gap:9px;align-items:start;
+  cursor:pointer;margin:0;text-transform:none;letter-spacing:normal;color:var(--wash)}
+.gh-scope input[type=radio]{margin:2px 0 0;accent-color:var(--thermo);width:15px;height:15px}
+.gh-scope b{display:block;font-size:0.8125rem;font-weight:600;color:var(--snow)}
+.gh-scope em{display:block;font-style:normal;font-size:0.75rem;line-height:1.5;
+  color:var(--wash-dim);margin-top:2px}
+.gh-scope i{font-style:normal;text-decoration:underline;text-underline-offset:2px}
+/* The grant as issued, not as requested. Warm when it is the wide one, so the page is not
+   quiet about a token that can write to every private repository the account can reach. */
+.gh-grant{margin:0;font-size:0.75rem;line-height:1.5;color:var(--wash-dim)}
+.gh-grant b{color:var(--snow);font-weight:600}
+.gh-grant.is-wide b{color:var(--held)}
+/* What the next run will read, stated where the run is started from. */
+.src{margin:0;font-size:0.75rem;line-height:1.5;color:var(--wash-dim);
+  border-left:2px solid var(--rule);padding-left:9px}
+.src b{color:var(--snow);font-weight:600;font-family:var(--ff-data)}
+.src.is-set{border-left-color:var(--thermo)}
 .mini.wide{width:100%}
 
 /* ---- agent tool graph: co-located scopes, red where an injection landed ---- */
@@ -2832,10 +2852,28 @@ html.is-diving,html.is-diving body{overflow:hidden}
       <div class="panel-hd"><h2 class="lbl" id="hd-run">Run</h2></div>
       <div class="bd">
         <form class="setup" id="setup" autocomplete="off">
-          <!-- Signing in lets you pick a repository Tainted can read; the backend only fetches
-               what your token can see. Hidden until /api/auth/status confirms OAuth is
-               configured, so a local dev server doesn't show a login button it can't use. -->
+          <!-- Two ways to name code, and no third. There is no field for typing a repository:
+               a name you type is a name you may not be able to read, and answering that with a
+               404 from GitHub is a worse conversation than never asking. So either the
+               built-in demonstration, or a repository Tainted detected for you after you
+               signed in — the list is whatever your own token returns, which makes the token
+               the authorization rather than the honour system. -->
           <div class="gh" id="gh" hidden>
+            <!-- How much to ask for, chosen before the redirect, because after it there is
+                 only GitHub's consent screen. `read:user` cannot open a private repository at
+                 all; `repo` is the only scope GitHub offers that can, and it is coarse enough
+                 that asking for it by default would be asking for more than a read-only scan
+                 needs. Public is preselected for that reason. -->
+            <fieldset class="gh-scope" id="ghscope">
+              <legend>Which of your repositories may Tainted list?</legend>
+              <label><input type="radio" name="ghaccess" value="public" checked>
+                <span><b>Public only</b><em>Asks GitHub for <code>read:user</code>. Private
+                  repositories stay invisible to this deployment.</em></span></label>
+              <label><input type="radio" name="ghaccess" value="private">
+                <span><b>Public and private</b><em>Asks for <code>repo</code> — GitHub&rsquo;s
+                  only private-repository scope, and it is read <i>and</i> write. Tainted never
+                  writes: the fix comes back as a patch for you to apply.</em></span></label>
+            </fieldset>
             <button class="mini wide" id="ghlogin" type="button">
               <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-github"/></svg>
               Sign in with GitHub
@@ -2843,29 +2881,31 @@ html.is-diving,html.is-diving body{overflow:hidden}
             <div class="gh-in" id="ghin" hidden>
               <p class="gh-who">Signed in as <b id="ghuser"></b>
                 <button class="linkbtn" id="ghlogout" type="button">Sign out</button></p>
-              <label>Repository<select id="f-gh-repo"><option value="">Loading your repositories…</option></select></label>
+              <!-- What the grant actually reaches, from /api/auth/status — the scope GitHub
+                   issued, not the one the radio asked for. A visitor who unticks private on
+                   the consent screen is told here, instead of hunting a picker for a
+                   repository that was never going to be in it. -->
+              <p class="gh-grant" id="ghgrant"></p>
+              <label>Repository<select id="f-gh-repo" aria-describedby="formerr">
+                <option value="">Loading your repositories…</option>
+              </select></label>
             </div>
-            <p class="gh-or" id="gh-or"><span>or give a local path</span></p>
           </div>
-          <!-- The dev fallback. A hosted deployment refuses a filesystem path outright, so it
-               is removed there rather than rendered and 403'd: offering an input the server
-               will not accept is worse than not offering one. `hidden` is set by
-               `applyDeploymentShape()` from /api/auth/status, never guessed from the URL. -->
-          <label id="repowrap">Repository path<input id="f-repo" placeholder="/path/to/your/app"
-                 aria-describedby="formerr"></label>
           <p class="formerr" id="formerr" role="alert"></p>
           <!-- Shown only when this deployment can do nothing but the demo: no GitHub sign-in
-               configured and no local paths accepted. It states the situation instead of
-               letting the reader discover it by being refused. -->
+               configured. It states the situation instead of letting the reader discover it by
+               being refused. -->
           <div class="demo-only" id="demoonly" hidden>
             <p><b>This deployment runs the demonstration only.</b> It has no GitHub sign-in
-              configured, and it does not accept filesystem paths — those belong to a Tainted
-              running on your own machine.</p>
+              configured, and signing in is the only way to reach a repository of your own.</p>
             <p class="formnote">To scan your own code: run Tainted locally, or ask whoever
               deployed this to set <code>GITHUB_CLIENT_ID</code>,
               <code>GITHUB_CLIENT_SECRET</code> and <code>TAINTED_TOKEN_SECRET</code>.</p>
           </div>
           <button class="mini demo-load" id="loaddemo" type="button">Try it with <code>demo/demo</code></button>
+          <!-- What the next run will actually read. With the input gone, the selection lives
+               in two different controls, and neither of them is beside the Analyze button. -->
+          <p class="src" id="srcnote">Nothing chosen yet.</p>
           <button class="btn wide" id="scan" type="submit">
             <svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-struct"/></svg>Analyze
           </button>
@@ -4570,9 +4610,9 @@ html.is-diving,html.is-diving body{overflow:hidden}
 
   function refreshGates(){
     const g = gateState();
-    /* The chip is a live region, and this runs on every keystroke in the repository, target
-       and token fields. Writing the same words again is still a write, so it would re-announce
-       the gate once per character typed — the same trap `refreshArm` already avoids below. */
+    /* The chip is a live region, and this runs on every keystroke in the target and token
+       fields. Writing the same words again is still a write, so it would re-announce the gate
+       once per character typed — the same trap `refreshArm` already avoids below. */
     const chipEl = document.getElementById('gate-chip');
     const chipText =
       g.demo ? 'DEMONSTRATION'
@@ -4619,8 +4659,8 @@ html.is-diving,html.is-diving body{overflow:hidden}
     const say = (disabled, html) => {
       armBtn.disabled = disabled;
       /* A live region announces what is written to it, not what changed in it. This runs
-         on every keystroke in the repository, target and token fields, so an unconditional
-         write meant a screen reader re-read the whole note once per character typed. */
+         on every keystroke in the target and token fields, so an unconditional write meant a
+         screen reader re-read the whole note once per character typed. */
       if(note.innerHTML !== html) note.innerHTML = html;
     };
     if(!finds.length){
@@ -4630,8 +4670,8 @@ html.is-diving,html.is-diving body{overflow:hidden}
           'candidate, so there has to be one.');
       return g;
     }
-    /* Proving a path nobody analysed would fire exploits chosen from a different
-       repository. The button waits for the two to agree. */
+    /* Proving a repository nobody analysed would fire exploits chosen from a different
+       one. The button waits for the two to agree. */
     if(runKey() !== analysedKey){
       say(true, 'That is not the repository these candidates came from. ' +
         '<b>Analyze it first</b>, then arm the lamp.');
@@ -6909,25 +6949,57 @@ html.is-diving,html.is-diving body{overflow:hidden}
     return String(Math.floor(secs / 60)).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0');
   };
   const val = id => document.getElementById(id).value.trim();
-  const isDemo = () => val('f-repo') === 'demo/demo';
+
+  /* ---------- what will be analysed ----------
+     There are two ways to answer that and no third: the built-in demonstration, or a
+     repository chosen from the list GitHub returned for the signed-in caller. There is no
+     field to type one into, deliberately — a typed name is a name the caller may not be able
+     to read, and the picker cannot produce one that GitHub did not just hand us.
+
+     `chosen` is the whole selection. The demo sets it directly; the picker sets it on change.
+     Everything downstream — the request body, the run key, the gate, the share link — reads
+     this one value instead of scraping a field. */
+  const DEMO_REPO = 'demo/demo';
+  let chosen = '';
+  /* A repository named by `?repo=` before the picker has loaded. See `fromAddress`. */
+  let pendingRepo = '';
+  const selectedRepo = () => chosen;
+  const isDemo = () => chosen === DEMO_REPO;
   const targetLabel = () =>
     isDemo() ? 'a fictional app' : (val('f-url').replace(/^https?:\/\//, '') || 'the target');
 
-  /* A request names its repository one of two ways, and the backend accepts either: `repo`
-     is an owner/name the signed-in user can reach, fetched server-side; `repo_path` is a
-     local path. The picker wins when it holds a selection, so signing in and choosing never
-     silently loses to a stale path left in the field below it. */
+  /* The repository half of every request body. Empty when nothing is chosen, which the
+     backend answers with "Sign in with GitHub and pick one, or try `demo/demo`" — the same
+     two options the page offers, named the same way. */
   function repoSelection(){
-    const gh = document.getElementById('f-gh-repo');
-    const picked = gh && !gh.disabled ? gh.value.trim() : '';
-    return picked ? {repo: picked} : {repo_path: val('f-repo')};
+    return chosen ? {repo: chosen} : {};
+  }
+
+  /* Choosing is one function so that the two controls cannot drift apart: picking a
+     repository clears the demo, and loading the demo clears the picker. A page holding both a
+     selected repository and a loaded demonstration would have to guess which one Analyze
+     meant. */
+  function choose(repo){
+    chosen = (repo || '').trim();
+    const pick = document.getElementById('f-gh-repo');
+    if(pick && pick.value !== chosen) pick.value = chosen === DEMO_REPO ? '' : chosen;
+    const note = document.getElementById('srcnote');
+    note.classList.toggle('is-set', !!chosen);
+    note.innerHTML = !chosen
+      ? 'Nothing chosen yet.'
+      : isDemo()
+        ? 'Analyzing <b>demo/demo</b> \u2014 the built-in demonstration. No code is read and ' +
+          'nothing is contacted.'
+        : 'Analyzing <b>' + ESC(chosen) + '</b>, fetched with your GitHub token for the ' +
+          'length of one request.';
+    syncDemoForm();
   }
   /* The identity of a run, so `prove` can refuse to fire at a repository that `analyze`
      never looked at. */
   const runKey = () => JSON.stringify(repoSelection());
   let analysedKey = null;
 
-  /* Typing the demo repo disables the five fields it does not need, so the form stops asking
+  /* Choosing the demonstration disables the fields it does not need, so the form stops asking
      for credentials that would go nowhere. Fields are genuinely disabled, not just dimmed: a
      field that looks unavailable but still takes keystrokes lies to keyboard users. */
   const PROVE_FIELDS = ['f-url', 'f-a-email', 'f-a-pass', 'f-b-email', 'f-b-pass',
@@ -6987,59 +7059,58 @@ html.is-diving,html.is-diving body{overflow:hidden}
        written by hand, so every path that can change the gate ends here. */
     refreshArm();
   }
-  /* Every control that can move the gate — repository, target, token, picker — re-derives
-     it. A gate that only updates when a request comes back would spend the interesting
-     moments describing the previous run. */
-  ['f-repo', 'f-url', 'f-own'].forEach(id =>
+  /* Every control that can move the gate — target, token, picker — re-derives it. A gate that
+     only updated when a request came back would spend the interesting moments describing the
+     previous run. */
+  ['f-url', 'f-own'].forEach(id =>
     document.getElementById(id).addEventListener('input', syncDemoForm));
-  document.getElementById('f-gh-repo').addEventListener('change', syncDemoForm);
+  document.getElementById('f-gh-repo').addEventListener('change', ev => choose(ev.target.value));
   document.getElementById('loaddemo').addEventListener('click', () => {
-    document.getElementById('f-repo').value = 'demo/demo';
-    syncDemoForm();
+    choose(DEMO_REPO);
     document.getElementById('setup').requestSubmit();
   });
 
   /* ---------- signing in ----------
-     GitHub sign-in answers "which repository, and may we read it" for the hosted deployment:
-     the backend only ever fetches what the caller's own token can see. It is entirely
-     optional — a server that cannot sign anyone in (no OAuth app, or no signing secret)
-     never shows this, and the path field below still works as before. This page never sees
-     the token itself: it rides in an http-only cookie, sealed with a key only the backend
-     has, so not even the browser holding it can read it. */
+     GitHub sign-in is how the page learns which repositories exist for you, and it is the only
+     way to name one: the backend fetches nothing that the caller's own token cannot already
+     read, and there is no field to type a name into. A server that cannot sign anyone in (no
+     OAuth app, or no signing secret) never shows this, and the demonstration is then all it
+     offers. This page never sees the token itself: it rides in an http-only cookie, sealed
+     with a key only the backend has, so not even the browser holding it can read it. */
   const ghBox   = document.getElementById('gh');
   const ghIn    = document.getElementById('ghin');
   const ghPick  = document.getElementById('f-gh-repo');
   const ghLogin = document.getElementById('ghlogin');
+  const ghScope = document.getElementById('ghscope');
+  const ghGrant = document.getElementById('ghgrant');
+
+  /* Which of the two grants the visitor is asking for. Read at click time rather than tracked,
+     because the radio is the state — there is nowhere for a copy of it to be right. */
+  const wantsPrivate = () =>
+    ghScope.querySelector('input[name=ghaccess]:checked').value === 'private';
 
   /* What this deployment can actually be asked to do.
 
-     Three shapes, and the form has to match the one it is in rather than render every control
+     Two shapes, and the form has to match the one it is in rather than render every control
      and let the server refuse:
 
-       local dev      — sign-in optional, filesystem paths accepted
-       hosted + OAuth — sign in and pick a repository; no paths
-       hosted, no OAuth — the demo, and nothing else
+       sign-in configured — sign in, then pick from the repositories GitHub lists for you
+       no sign-in         — the demonstration, and nothing else
 
-     The third was the broken one: the page hid the sign-in box it could not use, left the
-     path field as the only visible input, and answered a submission with "Sign in with GitHub
-     and pick a repository" — naming a control that was not on the page. */
+     The second used to be the broken one: the page hid the sign-in box it could not use, left
+     a filesystem-path field as the only visible input, and answered a submission with "Sign in
+     with GitHub and pick a repository" — naming a control that was not on the page. The path
+     field is gone now, so the shape is simply "can anyone sign in here". */
   function applyDeploymentShape(st){
-    const canPath = !!st.local_paths;
     const canGitHub = !!st.configured;
-    document.getElementById('repowrap').hidden = !canPath;
-    document.getElementById('demoonly').hidden = canPath || canGitHub;
-    /* "or give a local path" is only a real alternative where paths are accepted. */
-    const or = document.getElementById('gh-or');
-    if(or) or.hidden = !canPath;
-    /* With no repository input of any kind, Analyze has nothing to act on except the demo.
-       The demo button stays, because it is the one thing that does work. */
-    const usable = canPath || canGitHub;
-    document.getElementById('scan').hidden = !usable;
+    document.getElementById('demoonly').hidden = canGitHub;
+    /* With nobody able to sign in, Analyze has nothing to act on except the demonstration,
+       which starts itself from its own button. */
+    document.getElementById('scan').hidden = !canGitHub;
     /* The prove fields are downstream of a repository: they describe the running app whose
        candidates a run will attack. With no way to name a repository here, they are seven
-       inputs — two of them credentials for someone else's app — that nothing can act on. The
-       same rule applies to them as to the path field. */
-    document.querySelectorAll('[data-needs-repo]').forEach(el => { el.hidden = !usable; });
+       inputs — two of them credentials for someone else's app — that nothing can act on. */
+    document.querySelectorAll('[data-needs-repo]').forEach(el => { el.hidden = !canGitHub; });
   }
 
   async function refreshAuth(){
@@ -7050,12 +7121,41 @@ html.is-diving,html.is-diving body{overflow:hidden}
     if(!st.configured){ ghBox.hidden = true; return; }
     ghBox.hidden = false;
     ghLogin.hidden = !!st.authenticated;
+    /* The choice belongs to the moment before the redirect. Once signed in, what matters is
+       the grant that came back, which `ghgrant` states instead. */
+    ghScope.hidden = !!st.authenticated;
     ghIn.hidden = !st.authenticated;
     if(st.authenticated){
       document.getElementById('ghuser').textContent = st.login || 'you';
+      showGrant(st.access);
       await loadRepos();
     }
     syncDemoForm();
+  }
+
+  /* The reach of the session, as GitHub issued it. Said plainly in both directions: a narrow
+     grant explains why a private repository is missing from the picker and offers the way to
+     widen it, and a wide one does not go unmentioned, because it carries write access to every
+     private repository the account can reach. */
+  function showGrant(access){
+    const wide = access === 'private';
+    ghGrant.classList.toggle('is-wide', wide);
+    ghGrant.innerHTML = wide
+      ? 'GitHub granted <b>public and private</b> access (<code>repo</code>). Tainted reads; ' +
+        'it never writes. <button class="linkbtn" id="ghnarrow" type="button">' +
+        'Sign in again, public only</button>'
+      : 'GitHub granted <b>public repositories only</b>. Private ones are not listed and ' +
+        'cannot be fetched. <button class="linkbtn" id="ghwiden" type="button">' +
+        'Include private repositories</button>';
+    const again = ghGrant.querySelector('#ghwiden, #ghnarrow');
+    if(again) again.addEventListener('click', () => signIn(!wide));
+  }
+
+  /* Changing the grant means going back to GitHub's consent screen — there is no other place
+     a scope can be changed, and pretending otherwise would be a control that quietly did
+     nothing. */
+  function signIn(includePrivate){
+    location.href = '/api/auth/github/login?access=' + (includePrivate ? 'private' : 'public');
   }
 
   async function loadRepos(){
@@ -7064,6 +7164,9 @@ html.is-diving,html.is-diving body{overflow:hidden}
       const {repos} = await (await fetch('/api/repos')).json();
       if(!repos || !repos.length){
         ghPick.innerHTML = '<option value="">No repositories available for this account</option>';
+        /* Nothing to resolve a `?repo=` link against, and leaving it pending would let it
+           land on a later sign-in as a different account. */
+        pendingRepo = '';
         return;
       }
       /* Built as options, not as markup: a repository name is text the page did not write. */
@@ -7072,15 +7175,27 @@ html.is-diving,html.is-diving body{overflow:hidden}
       repos.forEach(r => ghPick.appendChild(
         new Option(r.full_name + (r.private ? '  (private)' : ''), r.full_name)));
       ghPick.disabled = false;
+      /* A `?repo=` link names a repository before the list exists. Honour it only if it turns
+         out to be one of these — the link cannot grant reach the token does not have, and
+         selecting a name that is not in the list would show a choice that was never made. */
+      if(pendingRepo){
+        const match = repos.some(r => r.full_name === pendingRepo);
+        if(match) choose(pendingRepo);
+        else showError('That repository is not one of yours.',
+          ' ' + pendingRepo + ' is not in the list GitHub returned for this account. ' +
+          'Pick one from the list above, or sign in again including private repositories.');
+        pendingRepo = '';
+      }
     } catch(e){
       ghPick.innerHTML = '<option value="">Could not load your repositories. Try again.</option>';
     }
   }
 
-  ghLogin.addEventListener('click', () => { location.href = '/api/auth/github/login'; });
+  ghLogin.addEventListener('click', () => signIn(wantsPrivate()));
   document.getElementById('ghlogout').addEventListener('click', async () => {
     await fetch('/api/auth/logout', {method: 'POST'});
     ghPick.value = '';
+    choose('');
     clearResult();
     refreshAuth();
   });
@@ -7089,7 +7204,8 @@ html.is-diving,html.is-diving body{overflow:hidden}
   (function authError(){
     const e = new URLSearchParams(location.search).get('auth_error');
     if(!e) return;
-    showError('GitHub sign-in failed.', ' ' + e + ' You can still use a local path below.');
+    showError('GitHub sign-in failed.',
+      ' ' + e + ' You can try again, or run the demonstration.');
     const u = new URL(location.href); u.searchParams.delete('auth_error');
     history.replaceState(null, '', u.toString());
   })();
@@ -7167,11 +7283,13 @@ html.is-diving,html.is-diving body{overflow:hidden}
   const errEl = document.getElementById('formerr');
   function showError(what, message){
     errEl.innerHTML = '<b>' + ESC(what) + '</b>' + ESC(message);
-    document.getElementById('f-repo').setAttribute('aria-invalid', 'true');
+    /* The picker is the only repository control left, so it is the one that carries the
+       invalid state — and it describes itself with this message through `aria-describedby`. */
+    document.getElementById('f-gh-repo').setAttribute('aria-invalid', 'true');
   }
   function clearError(){
     errEl.textContent = '';
-    document.getElementById('f-repo').removeAttribute('aria-invalid');
+    document.getElementById('f-gh-repo').removeAttribute('aria-invalid');
   }
 
   function fail(message){
@@ -7186,13 +7304,13 @@ html.is-diving,html.is-diving body{overflow:hidden}
     showError('Could not prove this run.', ' ' + message);
   }
 
-  /* Analyze: static, read-only, and safe to run with nothing but a path. */
+  /* Analyze: static, read-only, and safe to run with nothing but a repository. */
   async function analyze(){
     const scan = document.getElementById('scan');
     scan.disabled = true;
     clearError();
     /* Nothing from the previous repository survives the request. If this one fails, the page
-       must not still show another target's findings under this path. */
+       must not still show another target's findings under this name. */
     clearResult();
     started = Date.now();
     const key = runKey();
@@ -7213,7 +7331,7 @@ html.is-diving,html.is-diving body{overflow:hidden}
       return true;
     } catch(e){
       showError('Could not analyze that repository.', ' ' + e.message +
-        ' Check the path, or try the demo below.');
+        ' Pick another one, or try the demonstration below.');
       return false;
     } finally {
       scan.disabled = false;
@@ -7223,6 +7341,14 @@ html.is-diving,html.is-diving body{overflow:hidden}
     ev.preventDefault();
     /* Enter in any field submits this form. Disabling `#scan` does not stop that. */
     if(armed) return;
+    /* The backend answers an empty selection with the same two options, but it should not
+       have to: the page knows nothing is chosen, and can say so beside the controls that do
+       the choosing instead of spending a request to be told. */
+    if(!selectedRepo()){
+      showError('Nothing to analyze yet.',
+        ' Pick one of your repositories above, or run the demonstration below.');
+      return;
+    }
     analyze();
   });
 
@@ -7417,7 +7543,7 @@ html.is-diving,html.is-diving body{overflow:hidden}
      settled state. Both re-run the engine; nothing here is a stored result. */
   function runLink(){
     const u = new URL(location.href);
-    u.search = '?repo=' + encodeURIComponent(val('f-repo'));
+    u.search = selectedRepo() ? '?repo=' + encodeURIComponent(selectedRepo()) : '';
     u.hash = document.body.dataset.lit === '1' ? '#proved' : '';
     return u.toString();
   }
@@ -7451,18 +7577,20 @@ html.is-diving,html.is-diving body{overflow:hidden}
   refreshAuth();
 
   (async function fromAddress(){
-    const repo = new URLSearchParams(location.search).get('repo');
+    const repo = (new URLSearchParams(location.search).get('repo') || '').trim();
     if(!repo) return;
-    document.getElementById('f-repo').value = repo;
-    syncDemoForm();
-    /* A link prefills the field; a person starts the run. Auto-running meant a URL someone
+    /* A link proposes a repository; a person starts the run. Auto-running meant a URL someone
        else wrote could make this page ask the server to go and read something, which is the
        shape of a request forged on the reader's behalf. The demonstration is the exception
        because it contacts nothing and reads nothing — there is no work to trigger. */
-    if(repo.trim() !== 'demo/demo'){
-      document.getElementById('f-repo').focus({preventScroll: true});
+    if(repo !== DEMO_REPO){
+      /* Held until the picker has loaded: a link is not a grant, so the name only becomes a
+         selection if it is one of the repositories GitHub listed for this caller. `loadRepos`
+         resolves it, or says why it could not. */
+      pendingRepo = repo;
       return;
     }
+    choose(DEMO_REPO);
     if(!await analyze()) return;
     if(location.hash === '#proved' && finds.length) await prove({instant: true});
     else if(/^#finding-\d+$/.test(location.hash)){

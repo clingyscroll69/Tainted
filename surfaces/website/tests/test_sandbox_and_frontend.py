@@ -329,9 +329,19 @@ def test_the_form_comes_before_the_ladder_on_a_narrow_screen():
 
 def test_only_the_demonstration_starts_itself_from_the_address_bar():
     """A link that makes the server go and read something is a request forged on the
-    reader's behalf. The demo contacts nothing, so there is no work to trigger."""
+    reader's behalf. The demo contacts nothing, so there is no work to trigger.
+
+    With the free-text field gone, a `?repo=` link is weaker still: it cannot select anything
+    the picker did not get from GitHub for this caller, so an unknown name is refused rather
+    than loaded."""
     html = FRONTEND.read_text(encoding="utf-8")
-    assert "if(repo.trim() !== 'demo/demo'){" in html
+    body = html.split("function fromAddress()", 1)[1].split("})();", 1)[0]
+    assert "if(repo !== DEMO_REPO){" in body
+    assert "pendingRepo = repo;" in body, "a link proposes; the picker is what confirms"
+    assert "choose(DEMO_REPO);" in body
+    # And the confirmation is a membership test against the list GitHub returned.
+    load = html.split("async function loadRepos()", 1)[1].split("\n  }", 1)[0]
+    assert "repos.some(r => r.full_name === pendingRepo)" in load
 
 
 def test_an_ownership_token_is_asked_for_rather_than_invented():
