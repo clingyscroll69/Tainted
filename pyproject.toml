@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "A security scanner for AI-written apps: finds where untrusted data reaches a dangerous place, proves it by attacking, and fixes it."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 authors = [{ name = "Tainted" }]
 
 dependencies = [

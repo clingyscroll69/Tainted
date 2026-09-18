@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Tainted local developer loop — analyze / watch / fix / pre-commit gate."
 requires-python = ">=3.11"
 readme = "README.md"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 authors = [{ name = "Tainted" }]
 # NOTE: the core engine (`tainted`) is installed alongside from the same repo — see
 # ../README.md. It is deliberately not listed here because it is not published to PyPI.

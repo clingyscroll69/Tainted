@@ -45,8 +45,9 @@ after this point is what to do when you want one surface published on its own, b
 
 ## 2. CLI — a pip install and a pre-commit hook
 
-The engine is **not on PyPI** (it is proprietary), so the CLI is not installed by name from
-there either. Both wheels ship together on the Release, and a consumer installs both URLs:
+The engine is **not on PyPI** (nothing has been uploaded there yet), so the CLI is not
+installed by name from there either. Both wheels ship together on the Release, and a
+consumer installs both URLs:
 
 ```bash
 python -m build --outdir dist .                 # tainted

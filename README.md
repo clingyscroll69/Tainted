@@ -101,3 +101,7 @@ Each surface is a different kind of artifact: the CLI and MCP server are pip ins
 surface is a GitHub Action, the website is a container image. **`PUBLISHING.md`** has one
 section per surface and the single tag that publishes all four
 (`.github/workflows/release.yml`).
+
+## License
+
+MIT — see `LICENSE`. Use it, fork it, sell it; keep the copyright notice with it.

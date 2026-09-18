@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Tainted demonstration website — FastAPI over the engine, cytoscape tool graph."
 requires-python = ">=3.11"
 readme = "README.md"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 authors = [{ name = "Tainted" }]
 # The core engine (`tainted`) is installed alongside from the same repo — see ../README.md.
 # Install the core with its dynamic extra so `prove` can drive a browser: pip install -e ".[dynamic]"
