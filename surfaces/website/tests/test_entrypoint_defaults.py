@@ -8,8 +8,10 @@ guarantee was a property of the image rather than of the server.
 That matters because the image is going away: a containerised website cannot spawn sandbox
 containers without being handed the host's Docker socket, which is root-equivalent and would go
 to the exact process running strangers' generated exploits. When the Dockerfile is deleted, the
-line goes with it, nothing errors, and every `prove` quietly runs in-process again — the precise
-failure `sandbox.py` exists to prevent, and one that looks identical to a working deployment.
+line goes with it, nothing errors, and `require_sandbox()` quietly reads false again — silently
+turning off the Docker-availability pre-check `sandbox.py` exists to keep loud, in a deployment
+that looks identical to a working one. (This does not put `prove` back in-process:
+`default_executor()` always returns `DockerExecutor`, and no configuration changes that.)
 
 So the default lives in `run.py`, the entrypoint `tainted-web` actually calls, and these tests
 assert it there. They deliberately do not read the Dockerfile: a test that reads the file being
@@ -54,16 +56,18 @@ def forget_the_variables():
 def test_the_entrypoint_fails_closed_when_nothing_sets_the_variable():
     run.apply_deployment_defaults()
     assert require_sandbox() is True, (
-        "`tainted-web` started with no sandbox required: `prove` would run untrusted "
-        "exploits in this process"
+        "`tainted-web` started with require_sandbox() false: the Docker-availability "
+        "pre-check would be silently off"
     )
 
 
 def test_an_explicit_opt_out_is_still_honoured(monkeypatch):
-    """`TAINTED_REQUIRE_SANDBOX=0` is the documented way to accept in-process execution.
+    """`TAINTED_REQUIRE_SANDBOX=0` is the documented way to turn off the Docker-availability
+    pre-check in `api_prove` — it does not, and cannot, put `prove` back in-process, since
+    `default_executor()` always returns `DockerExecutor` regardless of this variable.
 
-    A default that cannot be overridden is not a default, and PUBLISHING.md offers this exact
-    escape hatch. Forcing `=1` would silently break every deployment that took it.
+    A default that cannot be overridden is not a default. Forcing `=1` would silently break
+    every deployment that set `=0` to accept running without that pre-check.
     """
     monkeypatch.setenv("TAINTED_REQUIRE_SANDBOX", "0")
     run.apply_deployment_defaults()
@@ -106,7 +110,7 @@ def test_watching_before_blocking_is_still_available(monkeypatch):
     """The report-only mode the policy was written to allow is an opt-out, not the default.
 
     A deployment that wants to watch the policy before it blocks says so, the same way one
-    that accepts in-process execution says so.
+    that wants the Docker-availability pre-check off says so.
     """
     monkeypatch.setenv("TAINTED_CSP_ENFORCE", "0")
     run.apply_deployment_defaults()
