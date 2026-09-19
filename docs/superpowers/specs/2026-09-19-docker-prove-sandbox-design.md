@@ -1,6 +1,10 @@
 # Containing `prove`: a Docker execution sandbox
 
-- **Status**: DESIGN — approved in conversation 2026-09-19, not yet implemented
+- **Status**: IMPLEMENTED 2026-09-19. See `docs/superpowers/plans/2026-09-19-docker-prove-sandbox.md`.
+  Three deviations from this design, each argued in that plan: the probe-plan key is per-run
+  rather than per-process (a per-process key cannot verify across a container boundary),
+  `guard.py` moved into the engine (the sandbox image does not install surface packages), and
+  `only`/`skip` are analyze options rather than prove options.
 - **Supersedes**: the Cloudflare Browser Rendering / Containers worker promised by
   `surfaces/website/backend/sandbox.py`, `README.md`, `PUBLISHING.md` §5 and `.env.example`
 

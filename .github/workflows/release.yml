@@ -2,8 +2,9 @@
 #
 # Each surface has a different *kind* of artifact, which is why this is one workflow and not
 # four: a tag produces the packages the CLI and MCP surfaces are installed from, the two images
-# the CI and website surfaces run as, and the GitHub Release that is itself how the Action is
-# published. Nothing here is the source of truth for a version — `tests/test_release_shape.py`
+# the CI surface runs as and the sandbox `prove` runs untrusted exploits in, and the GitHub
+# Release that is itself how the Action is published. Nothing here is the source of truth for a
+# version — `tests/test_release_shape.py`
 # is, and the first job refuses a tag that disagrees with it.
 name: release
 
@@ -136,7 +137,7 @@ jobs:
           skip-existing: true
 
   # ------------------------------------------------------------------------- #
-  # CI and website: container images.
+  # CI and sandbox: container images.
   #
   # The CI image is also what makes the Action fast. Built from the repo root, because that is
   # the context `surfaces/ci/Dockerfile` expects and the context GitHub gives a root action.yml.

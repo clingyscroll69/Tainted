@@ -63,6 +63,11 @@ pip install "tainted[dynamic]"   # + the browser `prove` drives, for either of t
 Each surface pins the engine, so `tainted` arrives with it. The CI surface is a GitHub Action
 rather than a package — `surfaces/ci/README.md`.
 
+**macOS: `prove` needs host networking.** The sandbox container reaches your app on
+`localhost`, which on macOS crosses a VM boundary. Docker Desktop 4.34+ can do it (sign in, then
+Settings → Resources → Network → *Enable host networking*, then restart) and so can OrbStack.
+Colima and Podman cannot. Linux needs none of this.
+
 ## Setup (from a checkout)
 
 ```bash
@@ -113,9 +118,9 @@ two lines from Setup above, so a command that works in CI works on your machine.
 ## Shipping it
 
 Each surface is a different kind of artifact: the CLI and MCP server are PyPI packages, the CI
-surface is a GitHub Action, the website is a container image. **`PUBLISHING.md`** has one
-section per surface and the single tag that publishes all four
-(`.github/workflows/release.yml`).
+surface is a GitHub Action, the website ships as a wheel on the GitHub Release, meant to run on
+a host with Docker. **`PUBLISHING.md`** has one section per surface and the single tag that
+publishes all four (`.github/workflows/release.yml`).
 
 ## License
 

@@ -153,12 +153,12 @@ LESSONS: list[dict] = [
                 "body": "If your target is localhost or 127.0.0.1, Tainted trusts you own it and fires attacks immediately. No additional permission is needed.",
             },
             {
-                "heading": "Remote targets need proof of ownership",
-                "body": "If your target is on the internet, Tainted refuses to prove anything until you prove you own the target with the --ownership-token flag. You must place the token in a DNS TXT record or at /.well-known/tainted-verify on your app. This prevents Tainted from attacking systems you do not own.",
+                "heading": "Remote targets are refused outright",
+                "body": "The CLI proves against an app running on your own machine, so if the target is not localhost or 127.0.0.1, it refuses to run at all -- there is no flag or token that unlocks a remote target. Point it at an app running locally, or use the website surface, which has its own ownership check for a repository you picked from GitHub.",
             },
             {
                 "heading": "Interpret the exit code",
-                "body": "If prove finds any high-severity proven findings, it exits with code 1. Exit code 0 means no proven findings at that level or higher. Exit code 2 means the ownership check failed. Use these exit codes in scripts to decide what to do next.",
+                "body": "If prove finds any high-severity proven findings, it exits with code 1. Exit code 0 means no proven findings at that level or higher. Exit code 2 means the target was not localhost and prove was refused. Use these exit codes in scripts to decide what to do next.",
             },
         ],
         "next": "Next, use tainted fix to write a fix and prove the hole closes.",

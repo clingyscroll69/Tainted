@@ -51,9 +51,10 @@ tainted tutorial                 # first-scan, reading-a-report, on-save, on-com
 tainted tutorial first-scan      # one lesson, with the commands to run and what to expect back
 ```
 
-`prove` is gated by an ownership check: a `localhost` target needs nothing; a remote
-target needs `--ownership-token` (checked via a DNS TXT record or a
-`/.well-known/tainted-verify` file).
+`prove` runs real attacks inside a Docker sandbox, and is refused outright for anything but a
+`localhost` or `127.0.0.1` target: the CLI proves against an app running on this machine, so a
+remote target is not something a token can unlock — point it at a local app, or use the website
+surface, which has its own ownership check for a repository picked from GitHub.
 
 ## Which hole is `fix` fixing?
 

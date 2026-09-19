@@ -20,11 +20,16 @@ hidden and nothing else on the page notices.
 ## Execution sandbox
 
 `prove` runs untrusted, network-active exploits — the one part of this surface
-that's reckless to run on your own machine. `backend/sandbox.py` is the seam:
-`LocalExecutor` runs in-process (for dev and demos), and `CloudflareExecutor` is where
-production sends the run into Cloudflare Browser Rendering / Containers instead. The
-backend only depends on the `Executor` protocol, so swapping one for the other is a
-one-line change.
+that's reckless to run in-process. `backend/sandbox.py` is the seam: `LocalExecutor` runs
+in-process (for dev and demos), and `DockerExecutor` spawns one `tainted-sandbox` container
+per run, as a sibling of the server process. The backend only depends on the `Executor`
+protocol, so swapping one for the other is a one-line change, and `tainted-web` defaults to
+`DockerExecutor` via `TAINTED_REQUIRE_SANDBOX=1` (see below).
+
+**macOS: `prove` needs host networking.** The sandbox container reaches your app on
+`localhost`, which on macOS crosses a VM boundary. Docker Desktop 4.34+ can do it (sign in, then
+Settings → Resources → Network → *Enable host networking*, then restart) and so can OrbStack.
+Colima and Podman cannot. Linux needs none of this.
 
 ## Where the loop stops short
 
@@ -42,9 +47,12 @@ are what the Dockerfile below is for. On a platform with a short function timeou
 `/tmp`, `analyze` will work and `prove` will not — lower the two limits and expect the rest to
 need re-architecting into a queued job.
 
-**This surface is not on PyPI**, unlike the CLI and MCP ones. Nobody installs the website by
-name — it is run by whoever deploys it — so it ships as a wheel on the GitHub Release and as the
-container image below. Its wheel still pins the engine, so `tainted` comes with it:
+**This surface is not on PyPI**, unlike the CLI and MCP ones, and it is not a container image
+either. Nobody installs the website by name — it is run by whoever deploys it — so it ships as
+a wheel on the GitHub Release, meant to run as a process on a host with a working Docker daemon
+(`prove` spawns one sandbox container per run, as a sibling process — not a container image
+itself, because that would need the host's Docker socket mounted into it, and socket access is
+root-equivalent). Its wheel still pins the engine, so `tainted` comes with it:
 
 ```bash
 pip install https://github.com/OWNER/tainted/releases/download/vX.Y.Z/tainted_website-X.Y.Z-py3-none-any.whl \
@@ -60,34 +68,25 @@ pip install -e ".[dynamic]"          # core engine (+ the Playwright extra, for 
 pip install -e surfaces/website       # this surface
 ```
 
-Or containerized (build context = repo root):
-
-```bash
-docker build -f surfaces/website/Dockerfile -t tainted-web .
-docker run -p 8000:8000 -e GEMINI_API_KEY=$GEMINI_API_KEY tainted-web
-```
-
 `tainted-web` defaults **`TAINTED_REQUIRE_SANDBOX=1`** whichever way it is started, so a real
-`prove` is refused until `TAINTED_SANDBOX_URL` / `TAINTED_SANDBOX_TOKEN` point at a sandbox.
-**The worker they point at is not in this repository** — `backend/sandbox.py` is the client for
-it. The bundled demo contacts nothing and is exempt, so the whole loop still demonstrates
-untouched. To accept in-process execution on your own metal, set `TAINTED_REQUIRE_SANDBOX=0` and
-say so out loud. That default lives in `backend/run.py` rather than in the image on purpose: as
-a property of the image it would have been deleted along with it.
+`prove` is refused unless the host has Docker: `DockerExecutor` builds and runs the sandbox
+image `ghcr.io/OWNER/tainted-sandbox:X.Y.Z`, pinned to `tainted.__version__` (never `:latest`),
+one container per `prove` run. The bundled demo contacts nothing and is exempt, so the whole
+loop still demonstrates without Docker. To accept in-process execution on your own metal, set
+`TAINTED_REQUIRE_SANDBOX=0` and say so out loud. That default lives in
+`backend/run.py`'s `apply_deployment_defaults()` rather than in any image, so it holds however
+the server is started.
 
 It defaults **`TAINTED_CSP_ENFORCE=1`** the same way and for the same reason, so the CSP blocks
 rather than only reporting. The policy already allows `unsafe-inline` for the inline script and
 style this page carries, so there is nothing for a watching period to find; `=0` asks for
 report-only.
 
-The image differs from the dev server on two further points, each a deployment decision rather
-than a preference:
+The sandbox image runs as an **unprivileged user** — `prove` executes untrusted, network-active
+code, and as uid 0 a process escape and a container escape are the same event — and ships the
+**Chromium** `prove` drives.
 
-- it ships the **Chromium** `prove` drives, not only the Playwright client that drives it;
-- it runs as an **unprivileged user** — `prove` executes untrusted, network-active code, and as
-  uid 0 a process escape and a container escape are the same event.
-
-`PUBLISHING.md` §5 has the full `docker run`, and what each variable costs to get wrong.
+`PUBLISHING.md` §5 has the full deployment command, and what each variable costs to get wrong.
 
 ## Two ways to name code, and no third
 

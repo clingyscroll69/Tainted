@@ -10,11 +10,14 @@ one-time setup each surface needs before the first release.
 | **CLI** | a PyPI package (`tainted-cli`) | `pip install tainted-cli` | PyPI, plus Release assets |
 | **CI** | a GitHub Action at this repo's root | `uses: OWNER/tainted@v0` | the git tag + Release |
 | **MCP** | a PyPI package (`tainted-mcp`) | `pip install tainted-mcp` | PyPI, plus Release assets |
-| **Website** | a container image | `docker run ghcr.io/OWNER/tainted-web` | GHCR |
+| **Website** | a wheel | run on a host with Docker | GitHub Release |
 
 The website is the one surface **not** on PyPI: nobody installs it by name. It is run by whoever
 deploys it, from the Release wheel or a checkout, so a PyPI project for it would be a name to
-maintain for an install path no one takes.
+maintain for an install path no one takes. It is also not a container image: a containerised
+website would need the host's Docker socket mounted in so it could spawn sandbox siblings, and
+socket access is root-equivalent — handed to the very process that runs strangers' generated
+exploits. Running as a plain process that spawns sibling containers is strictly better.
 
 Everywhere below, **`OWNER`** is your GitHub user or org and **`X.Y.Z`** the version.
 
@@ -176,27 +179,29 @@ there is no service to run. If you host it over SSE or streamable-HTTP instead, 
 website's problem shape: a long-lived process, and the job table's ceiling
 (`TAINTED_MCP_MAX_JOBS`, `TAINTED_MCP_JOB_TTL_S`) starts mattering.
 
-## 5. Website — a container image
+## 5. Website — a wheel
 
 ```bash
-docker build -f surfaces/website/Dockerfile -t ghcr.io/OWNER/tainted-web:X.Y.Z .  # context = root
-echo "$GITHUB_TOKEN" | docker login ghcr.io -u OWNER --password-stdin
-docker push ghcr.io/OWNER/tainted-web:X.Y.Z
+python -m build --wheel surfaces/website
 ```
 
-Then run it somewhere that gives it a **long-lived container** — not a serverless function.
-`prove` holds a worker thread for up to `TAINTED_PROVE_TIMEOUT_S` (900 s) and a fetched repo may
-expand to `TAINTED_MAX_EXTRACTED_MB` (1024) of writable temp space. Fly.io, Railway, Render,
-Cloud Run with a long request timeout, or plain Docker on a VM all work.
+Upload the wheel to the GitHub Release for the tag. Whoever deploys it installs it on a host
+that has a working Docker daemon:
 
 ```bash
-docker run -p 8000:8000 \
-  -e TAINTED_TOKEN_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')" \
-  -e GITHUB_CLIENT_ID=... -e GITHUB_CLIENT_SECRET=... \
-  -e GITHUB_OAUTH_REDIRECT=https://your-host/api/auth/github/callback \
-  -e FORWARDED_ALLOW_IPS=... \
-  ghcr.io/OWNER/tainted-web:X.Y.Z
+pip install tainted_web-X.Y.Z-py3-none-any.whl
+TAINTED_TOKEN_SECRET="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')" \
+  GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=... \
+  GITHUB_OAUTH_REDIRECT=https://your-host/api/auth/github/callback \
+  FORWARDED_ALLOW_IPS=... \
+  tainted-web
 ```
+
+Run it somewhere that gives it a **long-lived process** — not a serverless function. `prove`
+holds a worker thread for up to `TAINTED_PROVE_TIMEOUT_S` (900 s) and a fetched repo may expand
+to `TAINTED_MAX_EXTRACTED_MB` (1024) of writable temp space. Fly.io, Railway, Render, or plain
+Docker on a VM all work, as long as the host (or, for Docker-in-Docker setups, a Docker daemon
+reachable from inside it) can run containers.
 
 Four things about that command are the difference between a demo and a deployment:
 
@@ -208,23 +213,19 @@ Four things about that command are the difference between a demo and a deploymen
 * **`GITHUB_OAUTH_REDIRECT` is required behind a proxy**, which is every hosted deployment.
   Derived from the request, the callback URL is the proxy's, not the one registered with
   GitHub, and sign-in fails with an opaque error.
-* **`tainted-web` defaults `TAINTED_REQUIRE_SANDBOX` to `1`, and `prove` will be refused until
-  you stand up the sandbox.** The entrypoint carries this, not the image, so it holds however
-  the server is started. That is deliberate: `prove` runs untrusted, network-active exploits, and
-  `backend/sandbox.py` holds the client for a Cloudflare Browser Rendering / Containers worker
-  **that is not in this repository** — you write the service, set `TAINTED_SANDBOX_URL` and
-  `TAINTED_SANDBOX_TOKEN`, and the refusal lifts. The bundled `demo/demo` run contacts nothing
-  and works either way, so the container demonstrates the whole loop out of the box. If you
-  accept in-process execution on your own metal, set `TAINTED_REQUIRE_SANDBOX=0` — say it out
-  loud rather than discovering it.
+* **The host needs Docker, and `prove` is refused without it.** `tainted-web` defaults
+  `TAINTED_REQUIRE_SANDBOX` to `1`, carried by `run.apply_deployment_defaults()` rather than by
+  an image, so it holds however the server is started. Each `prove` run spawns one
+  `ghcr.io/OWNER/tainted-sandbox:X.Y.Z` container, as a sibling of the server process — never a
+  child, because that would need the root-equivalent Docker socket inside the very process that
+  runs strangers' exploits.
 * **`FORWARDED_ALLOW_IPS`** must name your proxy (or `*` only when nothing else can reach the
   port), or uvicorn ignores `X-Forwarded-*` and the app builds http URLs behind your https.
 
 `tainted-web` also defaults **`TAINTED_CSP_ENFORCE`** to `1`, so the Content-Security-Policy
 blocks rather than only reporting; set it to `0` to watch before blocking. Like the sandbox
-default it belongs to the entrypoint, not to the image, so it survives however you start the
-server. The image additionally runs as an unprivileged user, ships the Chromium `prove` drives,
-and has a `HEALTHCHECK` on `/healthz`. `.env.example` documents every remaining variable.
+default it belongs to `run.apply_deployment_defaults()`, not to any image, so it survives
+however you start the server. `.env.example` documents every remaining variable.
 
 ---
 
@@ -233,7 +234,10 @@ and has a `HEALTHCHECK` on `/healthz`. `.env.example` documents every remaining 
 Two limits are worth stating to whoever deploys this, because no amount of configuration closes
 them:
 
-* **The prove sandbox has no server side in this repository.** See section 5.
+* **Docker is not a VM.** `prove` runs in a container that shares the host kernel. This is
+  containment — filesystem and process isolation while parsing a stranger's repository and
+  driving Chromium — not the isolation a managed sandbox on someone else's infrastructure would
+  give. If this is ever deployed publicly, that limit is real and belongs in the reader's head.
 * **A sealed session cannot be revoked.** Logout deletes the cookie; a copy taken beforehand
   stays valid until the 8-hour expiry. That is the trade that makes a stateless deployment
   possible, and `backend/session_token.py` argues it out in full.
