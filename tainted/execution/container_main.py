@@ -64,9 +64,9 @@ def _run(req: RunRequest, key: Optional[bytes], out: TextIO) -> ProveOutcome:
 
 
 def main(stdin: TextIO, stdout: TextIO, env: dict[str, str]) -> int:
-    raw_key = env.get(RUN_KEY_ENV, "")
-    key = bytes.fromhex(raw_key) if raw_key else None
     try:
+        raw_key = env.get(RUN_KEY_ENV, "")
+        key = bytes.fromhex(raw_key) if raw_key else None
         req = RunRequest.model_validate(json.loads(stdin.read()))
         outcome = _run(req, key, stdout)
     except PlanViolation as exc:

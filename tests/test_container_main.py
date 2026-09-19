@@ -40,3 +40,14 @@ def test_an_unexpected_exception_is_reported_as_error(monkeypatch):
     assert _lines(out)[-1]["kind"] == "error"
     assert "kaboom" in _lines(out)[-1]["message"]
     assert code == 1
+
+
+def test_a_malformed_run_key_is_reported_as_error():
+    """A corrupted TAINTED_RUN_KEY must emit an error event, not die silently."""
+    out = io.StringIO()
+    req = {"repo_path": "/repo", "setup": {}, "ownership_verified": True}
+    code = main(io.StringIO(json.dumps(req)), out, {"TAINTED_RUN_KEY": "not-hex"})
+    events = _lines(out)
+    assert events[-1]["kind"] == "error"
+    assert "hex" in events[-1]["message"].lower()
+    assert code == 1
