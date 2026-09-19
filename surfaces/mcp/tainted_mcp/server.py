@@ -23,11 +23,12 @@ from tainted.models import Check, Finding
 from tainted.ownership import verify
 from tainted.report import build_report, select_candidate
 from tainted.selfdefense import PlanViolation
-from tainted_mcp.guard import (
+from tainted.execution.guard import (
     build_probe_plan,
     commit_plan,
     guarded_prober,
     guarded_replay,
+    new_run_key,
 )
 
 server = MCPServer(
@@ -98,6 +99,7 @@ class _Job:
     # refused rather than obeyed.
     plan: Optional[object] = None
     plan_signature: str = ""
+    run_key: bytes = b""
     # When this job stopped running, so eviction can tell a result nobody has collected yet
     # from one that has been sitting there since last week. None while it is still going.
     finished: Optional[float] = None
@@ -170,12 +172,13 @@ def tainted_prove_start(
     # afterwards is checked against this; nothing it "decides" after reading target content
     # can widen it.
     plan = build_probe_plan(setup)
-    signature = commit_plan(plan)
+    key = new_run_key()
+    signature = commit_plan(plan, key)
 
     job_id = uuid.uuid4().hex
     with _JOBS_LOCK:
         _evict_finished()
-        _JOBS[job_id] = _Job(plan=plan, plan_signature=signature)
+        _JOBS[job_id] = _Job(plan=plan, plan_signature=signature, run_key=key)
     threading.Thread(
         target=_run_prove, args=(job_id, repo_path, setup), daemon=True
     ).start()
@@ -217,7 +220,7 @@ def _run_prove(job_id: str, repo_path: str, setup: ProveSetup) -> None:
         result = core_analyze(repo_path, llm=llm)
         # Live calls are constrained by the committed probe plan (self-defense). The plan is
         # re-verified here, on the far side of the thread boundary it just crossed.
-        replay, guard = guarded_replay(setup, job.plan, job.plan_signature)
+        replay, guard = guarded_replay(setup, job.plan, job.plan_signature, job.run_key)
         findings = core_prove(
             result,
             setup,

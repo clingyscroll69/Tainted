@@ -16,11 +16,12 @@ import pytest
 
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
 from tainted.selfdefense import AllowedCall, PlanViolation
-from tainted_mcp.guard import (
+from tainted.execution.guard import (
     build_probe_plan,
     commit_plan,
     guarded_prober,
     guarded_replay,
+    new_run_key,
 )
 
 
@@ -61,32 +62,28 @@ def test_a_plan_tampered_with_after_commitment_is_refused():
     """The whole point of signing: the plan survives a boundary and is checked on the far side."""
     s = setup()
     plan = build_probe_plan(s)
-    signature = commit_plan(plan)
+    key = new_run_key()
+    signature = commit_plan(plan, key)
 
     # Something between commitment and execution widens the plan.
     plan.allowed.append(AllowedCall(tool="GET", arg_constraints={}))
 
     with pytest.raises(PlanViolation, match="tampered"):
-        guarded_replay(s, plan, signature)
+        guarded_replay(s, plan, signature, key)
 
 
 def test_a_plan_signed_by_something_else_is_refused():
     s = setup()
     plan = build_probe_plan(s)
     with pytest.raises(PlanViolation):
-        guarded_replay(s, plan, "0" * 64)
-
-
-def test_a_prebuilt_plan_without_its_signature_is_rejected():
-    s = setup()
-    with pytest.raises(ValueError, match="signature"):
-        guarded_replay(s, build_probe_plan(s), None)
+        guarded_replay(s, plan, "0" * 64, new_run_key())
 
 
 def test_an_untampered_plan_verifies_and_enforces():
     s = setup()
     plan = build_probe_plan(s)
-    replay, guard = guarded_replay(s, plan, commit_plan(plan))
+    key = new_run_key()
+    replay, guard = guarded_replay(s, plan, commit_plan(plan, key), key)
     assert guard.blocked_calls == []
 
 
@@ -97,7 +94,8 @@ def test_the_route_prober_is_guarded_too():
     """A guard covering only PostgREST would leave the harness that sends arbitrary paths open."""
     s = setup(url="http://localhost:3000")
     plan = build_probe_plan(s)
-    _, guard = guarded_replay(s, plan, commit_plan(plan))
+    key = new_run_key()
+    _, guard = guarded_replay(s, plan, commit_plan(plan, key), key)
     prober = guarded_prober(s, guard)
 
     with pytest.raises(PlanViolation):
@@ -111,7 +109,8 @@ def test_the_route_prober_is_guarded_too():
 def test_an_in_plan_request_passes_through_the_guard():
     s = setup(url="http://localhost:3000")
     plan = build_probe_plan(s)
-    _, guard = guarded_replay(s, plan, commit_plan(plan))
+    key = new_run_key()
+    _, guard = guarded_replay(s, plan, commit_plan(plan, key), key)
 
     # Swap in a mock transport so the allowed request resolves without a live server.
     prober = guarded_prober(s, guard)
