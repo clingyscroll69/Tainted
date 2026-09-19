@@ -72,6 +72,19 @@ def test_the_repo_is_mounted_read_only():
     assert "--cap-drop" in r.argv
 
 
+def test_read_only_root_still_leaves_chromium_somewhere_to_write():
+    """Finding B1. `--read-only` alone makes /tmp and /home/tainted read-only too, and
+    `prove` drives Chromium, which needs both writable plus more than the default 64 MB
+    /dev/shm. Missing these, every prove that reaches Playwright dies at browser launch and
+    the run quietly returns the httpx-only subset of findings instead of erroring."""
+    r = FakeRunner([_report_line()])
+    DockerExecutor(runner=r).prove("/repo", _setup(), ownership_verified=True)
+    assert "--tmpfs" in r.argv
+    assert "/tmp" in r.argv
+    assert "/home/tainted" in r.argv
+    assert "--shm-size=1g" in r.argv
+
+
 def test_the_target_url_crosses_unmodified():
     """Spec test 3 — the regression guard for the `.internal` trap. Rewriting localhost to
     host.docker.internal would make Target.is_local false and Target.is_internal true, so the
@@ -133,6 +146,29 @@ def test_a_run_that_ends_with_no_terminal_event_is_an_error():
         DockerExecutor(runner=r).prove("/repo", _setup(), ownership_verified=True)
 
 
+def test_gemini_key_crosses_when_the_host_has_one(monkeypatch):
+    """Finding B2, part 1. Without this, every tool-plane candidate inside the container
+    returns `_unprovable("No LLM configured...")` and `core_analyze` ranks without the
+    meaning register `analyze` already showed the user on the host."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    r = FakeRunner([_report_line()])
+    DockerExecutor(runner=r).prove("/repo", _setup(), ownership_verified=True)
+    assert "GEMINI_API_KEY" in r.argv
+    # Bare `-e NAME`, never `-e NAME=value`: the key must not sit in this process's own argv.
+    assert not any(a.startswith("GEMINI_API_KEY=") for a in r.argv)
+    assert json.loads(r.stdin)["llm_expected"] is True
+
+
+def test_gemini_key_is_not_forwarded_when_the_host_has_none(monkeypatch):
+    """Finding B2, counterpart. No phantom `GEMINI_API_KEY` is created in a container whose
+    host has none."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    r = FakeRunner([_report_line()])
+    DockerExecutor(runner=r).prove("/repo", _setup(), ownership_verified=True)
+    assert "GEMINI_API_KEY" not in r.argv
+    assert json.loads(r.stdin)["llm_expected"] is False
+
+
 def test_no_plan_means_no_stray_run_key_forwarded_into_the_container():
     """Finding 1. Bare `-e NAME` forwards NAME from the host's own environment, so an
     unguarded run must not append it at all — otherwise a stale host-side TAINTED_RUN_KEY
@@ -150,9 +186,28 @@ def test_a_plan_means_the_run_key_flag_is_present():
     r = FakeRunner([_report_line()])
     plan = ProbePlan(target_url="http://localhost:3000", allowed=[])
     DockerExecutor(runner=r).prove(
-        "/repo", _setup(), ownership_verified=True, plan=plan, plan_signature="sig",
+        "/repo", _setup(), ownership_verified=True,
+        plan=plan, plan_signature="sig", run_key=b"\x00" * 32,
     )
     assert RUN_KEY_ENV in r.argv
+
+
+def test_a_partial_guard_set_is_refused_before_anything_is_spawned():
+    """Finding S3. Plan and signature with no run key used to make `DockerExecutor` mint a
+    fresh key of its own, which the container would then reject as `PlanViolation` against a
+    signature it can never verify — a wiring bug MCP reports as `status="refused"`, inverting
+    the one distinction that surface is most careful about. `LocalExecutor` already refuses a
+    partial set outright (base.py); this is the same guard, and it must fire before the runner
+    is ever invoked."""
+    from tainted.selfdefense import ProbePlan
+
+    r = FakeRunner([_report_line()])
+    plan = ProbePlan(target_url="http://localhost:3000", allowed=[])
+    with pytest.raises(ValueError, match="partial set"):
+        DockerExecutor(runner=r).prove(
+            "/repo", _setup(), ownership_verified=True, plan=plan, plan_signature="sig",
+        )
+    assert r.argv is None, "the runner must never be invoked for a partial guard set"
 
 
 # --- Real-subprocess tests for SubprocessRunner. No Docker daemon involved: argv points at

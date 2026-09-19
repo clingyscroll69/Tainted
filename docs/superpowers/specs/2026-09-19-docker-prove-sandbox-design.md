@@ -77,11 +77,20 @@ docker run --rm -i \
   --network <host|bridge> \
   -v <repo>:/repo:ro \
   --read-only \
+  --tmpfs /tmp \
+  --tmpfs /home/tainted \
+  --shm-size=1g \
   --cap-drop ALL \
   --security-opt no-new-privileges \
   --user <non-root> \
   ghcr.io/<owner>/tainted-sandbox:<version>
 ```
+
+`--read-only` makes the whole root filesystem read-only, and `prove` drives Chromium, which
+needs a writable profile directory under the user's home, a writable `/tmp`, and more than the
+64 MB Docker gives `/dev/shm` by default. Without the two `--tmpfs` mounts and `--shm-size`,
+every `prove` that reaches Playwright dies at browser launch — quietly, since the httpx-only
+probes still succeed and the run reports a subset of findings rather than an error.
 
 `ProveSetup` and the run options cross as JSON on **stdin**. Progress events and the final
 `Report` come back as **NDJSON on stdout**, one object per line, discriminated by a `kind` field.

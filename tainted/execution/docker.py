@@ -7,8 +7,9 @@ property the work exists to provide.
 
 **Docker is not a VM.** The container shares the host kernel. This is containment, not the
 isolation the Cloudflare docstring this replaces used to claim. What it buys is filesystem and
-process isolation while parsing a stranger's repository and driving Chromium — which is the part
-that protects the machine.
+process isolation while *executing* the exploit and driving Chromium against a stranger's
+target — the part that puts network-active, generated code on the machine. Parsing the
+repository (`analyze`) is deliberately not done here; see `DockerExecutor.analyze` below.
 """
 
 from __future__ import annotations
@@ -25,9 +26,9 @@ from tainted.execution.base import (
     OnFinding,
     ProveOutcome,
     SandboxUnavailable,
+    _llm_or_none,
 )
 from tainted.execution.container_main import RUN_KEY_ENV
-from tainted.execution.guard import new_run_key
 from tainted.execution.wire import RunRequest, decode_event
 from tainted.dynamic.target import ProveSetup
 from tainted.models import Candidate, Finding
@@ -61,18 +62,33 @@ class SubprocessRunner:
         )
         assert proc.stdin and proc.stdout
         try:
-            proc.stdin.write(stdin)
-            proc.stdin.close()
-        except (BrokenPipeError, OSError):
-            # The child may have already exited (e.g. an invalid image). Fall through to
-            # draining stdout and checking the return code, so the real cause — surfaced via
-            # the non-zero exit below — reaches the caller instead of this pipe error masking it.
-            pass
-        yield from proc.stdout
-        stderr = proc.stderr.read() if proc.stderr else ""
-        proc.wait()
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, argv, output=None, stderr=stderr)
+            try:
+                proc.stdin.write(stdin)
+                proc.stdin.close()
+            except (BrokenPipeError, OSError):
+                # The child may have already exited (e.g. an invalid image). Fall through to
+                # draining stdout and checking the return code, so the real cause — surfaced
+                # via the non-zero exit below — reaches the caller instead of this pipe error
+                # masking it.
+                pass
+            yield from proc.stdout
+            stderr = proc.stderr.read() if proc.stderr else ""
+            proc.wait()
+            if proc.returncode:
+                raise subprocess.CalledProcessError(
+                    proc.returncode, argv, output=None, stderr=stderr
+                )
+        finally:
+            # A generator that returns from inside `yield from` — which is exactly what the
+            # `report` terminal event causes the caller to do, on every successful run — never
+            # runs the code after the loop. Without this `finally`, `proc.stdout`/`proc.stderr`
+            # are never closed and `proc.wait()` never called, leaking fds and an unreaped
+            # child per prove in the website's and MCP's worker threads.
+            if proc.stdout:
+                proc.stdout.close()
+            if proc.stderr:
+                proc.stderr.close()
+            proc.wait()
 
 
 class DockerExecutor:
@@ -102,12 +118,21 @@ class DockerExecutor:
 
         return LocalExecutor().analyze(repo_path, only=only, skip=skip)
 
-    def _argv(self, repo_path: str, has_key: bool) -> list[str]:
+    def _argv(self, repo_path: str, has_key: bool, has_llm_key: bool) -> list[str]:
         argv = [
             "docker", "run", "--rm", "-i",
             f"--network={self.network}",
             "-v", f"{repo_path}:/repo:ro",
             "--read-only",
+            # `--read-only` makes the whole root filesystem read-only, `/home/tainted` and
+            # `/tmp` included. `prove` drives Chromium, which needs a writable profile
+            # directory, a writable /tmp, and more than the 64 MB Docker gives /dev/shm by
+            # default — without these three, every prove that reaches Playwright dies at
+            # browser launch and the run quietly returns the httpx-only subset of findings
+            # instead of erroring, which is the one failure mode this tool cannot afford.
+            "--tmpfs", "/tmp",
+            "--tmpfs", "/home/tainted",
+            "--shm-size=1g",
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
             "--user", "10001",
@@ -121,6 +146,14 @@ class DockerExecutor:
             # would put the key in this process's own argv, visible to `ps`, which is the whole
             # reason it travels as an env var rather than in the request body.
             argv += ["-e", RUN_KEY_ENV]
+        if has_llm_key:
+            # Same bare-`-e` convention, same reason: an exploit payload can read its own
+            # process's argv, and the key must not sit there. Forwarding it into the container
+            # is not a new exposure — before this branch the key sat in the very process
+            # running the exploit; a container that can read it is strictly better
+            # containment, not worse. Appended only when the host actually has a usable key,
+            # so no phantom GEMINI_API_KEY is created inside a container whose host has none.
+            argv += ["-e", "GEMINI_API_KEY"]
         argv.append(self.image)
         return argv
 
@@ -136,10 +169,26 @@ class DockerExecutor:
         on_candidates: Optional[OnCandidates] = None,
         on_finding: Optional[OnFinding] = None,
     ) -> ProveOutcome:
-        # A key only means something alongside a plan to sign. Minting one for an unguarded
-        # run would hand the container a partial set of guard arguments, which `LocalExecutor`
-        # now refuses outright rather than quietly running unguarded.
-        key = run_key or (new_run_key() if plan is not None else None)
+        # Same all-or-nothing guard `LocalExecutor` carries (base.py): a caller that passes a
+        # plan and its signature without a run key is not asking for an unguarded run, so
+        # minting a fresh key here would sign nothing the caller committed to. That used to
+        # happen — `key = run_key or (new_run_key() if plan is not None else None)` — and the
+        # container would then raise `PlanViolation("plan was tampered with")` against a key it
+        # invented itself, which MCP reports as `status="refused"`: a wiring bug read back as
+        # "the guard stopped an exfiltration", exactly the distinction this surface is most
+        # careful about.
+        supplied = [plan is not None, plan_signature is not None, run_key is not None]
+        if any(supplied) and not all(supplied):
+            raise ValueError(
+                "A guarded run needs the plan, its signature and the run key together. "
+                "Got a partial set, which would otherwise have run unguarded — refusing "
+                "rather than quietly downgrading the containment the caller asked for."
+            )
+        key = run_key
+        # Whether the host can answer meaning-register questions at all. The container gets
+        # no filesystem access to any host-side config, so this is the one signal it has for
+        # telling "no LLM configured anywhere" apart from "the key didn't cross the boundary".
+        llm_expected = _llm_or_none() is not None
         req = RunRequest(
             repo_path="/repo",
             # The target URL crosses untouched. Rewriting it would make `Target.is_local` false
@@ -149,8 +198,9 @@ class DockerExecutor:
             autodiscover=autodiscover,
             plan=_plan_json(plan),
             plan_signature=plan_signature,
+            llm_expected=llm_expected,
         )
-        argv = self._argv(repo_path, has_key=key is not None)
+        argv = self._argv(repo_path, has_key=key is not None, has_llm_key=llm_expected)
         env = {RUN_KEY_ENV: key.hex()} if key is not None else {}
         try:
             lines = self._runner.run(argv, req.model_dump_json(), env)
@@ -158,9 +208,9 @@ class DockerExecutor:
         except FileNotFoundError as exc:
             raise SandboxUnavailable(
                 "`prove` runs untrusted exploit code and requires Docker to contain it, but "
-                "the `docker` command was not found. Install Docker Desktop or OrbStack, or "
-                "set TAINTED_REQUIRE_SANDBOX=0 to say out loud that you accept an uncontained "
-                f"run on this machine. ({exc})"
+                "the `docker` command was not found. Install Docker Desktop or OrbStack, "
+                "start it, and pull the pinned image with `docker pull "
+                f"{self.image}`. ({exc})"
             ) from exc
         except subprocess.CalledProcessError as exc:
             raise SandboxUnavailable(

@@ -33,5 +33,10 @@ RUN playwright install --with-deps chromium \
 RUN useradd --create-home --uid 10001 tainted
 USER tainted
 
-# The repo is mounted read-only at /repo by the host. Nothing is written anywhere but /tmp.
+# The repo is mounted read-only at /repo by the host. The root filesystem is also read-only
+# (`docker run --read-only`); the only writable paths are /tmp and /home/tainted, and those are
+# tmpfs mounts the host supplies at `docker run` time (`--tmpfs`), not anything this image
+# provides on its own. Chromium needs both writable — a profile directory under the user's
+# home, and its own /tmp — so a host that runs this image without those tmpfs mounts gets a
+# container where every `prove` that reaches Playwright dies at browser launch.
 ENTRYPOINT ["python", "-m", "tainted.execution.container_main"]
