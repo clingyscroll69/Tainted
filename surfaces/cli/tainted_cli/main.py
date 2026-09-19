@@ -9,7 +9,6 @@ import typer
 
 from tainted import analyze as core_analyze
 from tainted import fix as core_fix
-from tainted import prove as core_prove
 from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target  # noqa: F401
 from tainted.llm.gemini import get_default_client
@@ -80,9 +79,6 @@ def prove(
     login_b: str = typer.Option(..., "--login-b", help="Account B, as email:password"),
     seed: Optional[str] = typer.Option(None, help="Seed record, as table:id"),
     anon_key: Optional[str] = typer.Option(None, help="Supabase anon key"),
-    ownership_token: Optional[str] = typer.Option(
-        None, help="Proves you own the target when it isn't localhost"
-    ),
     autodiscover: bool = typer.Option(
         False,
         help=(
@@ -92,29 +88,43 @@ def prove(
         ),
     ),
 ):
-    """Run real attacks against the running app. Off localhost, you must prove you own the target first."""
-    llm = _llm_or_none()
+    """Run real attacks against the running app, inside a Docker sandbox. Localhost only."""
     setup = _build_setup(url, login_a, login_b, seed, anon_key)
-    result = core_analyze(str(repo), llm=llm, target=setup.target)
 
-    verified = setup.target.is_local
-    if not verified and ownership_token:
-        from tainted.ownership import verify
+    # Localhost only, and derived rather than asserted. There is no token path to reach: the
+    # CLI points at an app you are running, so if the target is not local the honest answer is
+    # to refuse rather than to ask the caller to vouch for themselves.
+    if not setup.target.is_local:
+        console.print(
+            f"[red]{_e(setup.target.url)} is not localhost. The CLI proves against an app "
+            f"running on this machine; point it at one, or use the website for a remote "
+            f"target.[/red]"
+        )
+        raise typer.Exit(code=2)
 
-        verified = bool(verify(setup.target, expected_token=ownership_token))
+    from tainted.execution.base import SandboxUnavailable
+    from tainted.execution.docker import DockerExecutor
+
+    # Host networking, so `localhost` in the container IS this machine's localhost and the URL
+    # never has to be rewritten. See the design doc's network split.
+    executor = DockerExecutor(network="host")
     try:
-        findings = core_prove(
-            result,
+        outcome = executor.prove(
+            str(repo),
             setup,
-            ownership_verified=verified,
-            llm=llm,
+            ownership_verified=True,  # derived above: the target is genuinely local
             autodiscover=autodiscover,
         )
+    except SandboxUnavailable as exc:
+        console.print(f"[red]{_e(exc)}[/red]")
+        raise typer.Exit(code=2)
     except PermissionError as exc:
         console.print(f"[red]{_e(exc)}[/red]")
         raise typer.Exit(code=2)
 
-    render_report(build_report(result, findings))
+    report = outcome.report
+    render_report(report)
+    findings = report.findings
     if any(
         f.status == FindingStatus.PROVEN and f.severity.rank >= Severity.HIGH.rank
         for f in findings
