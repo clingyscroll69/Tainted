@@ -33,10 +33,15 @@ RUN playwright install --with-deps chromium \
 # unprivileged user for good.
 RUN useradd --create-home --uid 10001 tainted
 
-# Fail closed on the one thing that cannot be inferred from a missing variable. Without this,
-# a deployment whose sandbox is misconfigured quietly runs those exploits on its own metal and
-# looks exactly like one that is working. `sandbox.py` has always said the production entrypoint
-# sets it; this is the production entrypoint, and now it does.
+# Fail closed on the one thing that cannot be inferred from a missing variable. Without it, a
+# deployment whose sandbox is misconfigured quietly runs those exploits on its own metal and
+# looks exactly like one that is working.
+#
+# `backend/run.py` is what actually establishes this default now — and TAINTED_CSP_ENFORCE with
+# it, which failed the same silent way — so both guarantees survive this image being deleted,
+# which is the plan: a container cannot spawn sandbox containers without the root-equivalent
+# Docker socket. The two lines below are kept as restatements, saying what the image promises
+# where an operator reading the image will look for it.
 #
 # The bundled demo (`demo/demo`) contacts nothing and is exempt, so a container run with no
 # further configuration still demonstrates the whole loop. A real `prove` needs

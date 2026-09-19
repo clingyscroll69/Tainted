@@ -231,12 +231,15 @@ Consequences, each of which is work:
 - **`surfaces/website/Dockerfile` is deleted**, and the release matrix entry
   `website → tainted-web` is replaced by `sandbox → tainted-sandbox`
   (`.github/workflows/release.yml:100-127`).
-- **`run.py` must set `TAINTED_REQUIRE_SANDBOX=1`.** Today that default lives in the Dockerfile
-  (`surfaces/website/Dockerfile:45`), *not* in the entrypoint. Deleting the image without moving
-  the default would silently turn the website's fail-closed posture into a fail-open one. This is
-  the single highest-risk step in the change and needs its own regression test.
-- The other guarantees the image provided must move to the entrypoint or the deployment docs:
-  running as an unprivileged user, and `TAINTED_CSP_ENFORCE`.
+- **`run.py` must set `TAINTED_REQUIRE_SANDBOX=1`** — *done ahead of the rest of this change.*
+  The default used to live only in the Dockerfile (`surfaces/website/Dockerfile:45`), so deleting
+  the image would have silently turned the website's fail-closed posture into a fail-open one.
+  `run.apply_deployment_defaults()` now carries it, guarded by `tests/test_entrypoint_defaults.py`
+  — which asserts against the entrypoint rather than the Dockerfile, so it does not get deleted by
+  the commit that would cause the regression.
+- `TAINTED_CSP_ENFORCE` moved to `run.apply_deployment_defaults()` alongside the sandbox
+  default and is covered by the same tests — *done*. **Running as an unprivileged user is not**,
+  and is the last image-only guarantee still needing a home in the entrypoint or the docs.
 - `default_executor()` returns `DockerExecutor` in bridge mode.
 - The progress path at `app.py:667-671` now receives real events, because `streams` is finally
   true.

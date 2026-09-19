@@ -934,8 +934,10 @@ _IMMUTABLE = (".woff2", ".woff", ".ttf", ".js", ".css", ".png", ".svg", ".webp")
 # Everything this page loads is same-origin and self-hosted — the fonts, the graph library,
 # the stylesheet and the script are all served from here — so the policy can be closed almost
 # completely. `unsafe-inline` is the one concession: the stylesheet and the two scripts live
-# in the document, and nonce-ing them is a change to the page, not to this header. CSP is
-# report-only until TAINTED_CSP_ENFORCE is set, so a deployment can watch before it blocks.
+# in the document, and nonce-ing them is a change to the page, not to this header. Because that
+# concession is already in the policy, there is nothing on this page for a watching period to
+# discover — so `run.py` defaults TAINTED_CSP_ENFORCE on, and report-only is what a deployment
+# asks for with `=0` when it wants to watch something before blocking it.
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
