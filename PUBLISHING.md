@@ -7,10 +7,14 @@ one-time setup each surface needs before the first release.
 
 | Surface | Artifact | Consumer writes | Published by |
 |---|---|---|---|
-| **CLI** | wheels (`tainted` + `tainted-cli`) | `pip install …` | GitHub Release assets |
+| **CLI** | a PyPI package (`tainted-cli`) | `pip install tainted-cli` | PyPI, plus Release assets |
 | **CI** | a GitHub Action at this repo's root | `uses: OWNER/tainted@v0` | the git tag + Release |
-| **MCP** | wheels (`tainted` + `tainted-mcp`) | `"command": "tainted-mcp"` | GitHub Release assets |
+| **MCP** | a PyPI package (`tainted-mcp`) | `pip install tainted-mcp` | PyPI, plus Release assets |
 | **Website** | a container image | `docker run ghcr.io/OWNER/tainted-web` | GHCR |
+
+The website is the one surface **not** on PyPI: nobody installs it by name. It is run by whoever
+deploys it, from the Release wheel or a checkout, so a PyPI project for it would be a name to
+maintain for an install path no one takes.
 
 Everywhere below, **`OWNER`** is your GitHub user or org and **`X.Y.Z`** the version.
 
@@ -25,6 +29,40 @@ git push -u origin main
 
 Then in **Settings → Actions → General**, set workflow permissions to **Read and write**, so
 the release job can create the Release and push the moving major tag.
+
+### Claim the names on PyPI
+
+The surfaces pin `tainted==X.Y.Z` exactly, so they are only installable if the engine is on PyPI
+under that name. Four names are published — `tainted`, `tainted-cli`, `tainted-ci`,
+`tainted-mcp` — and `tainted-website` is not, for the reason in the table above.
+
+Claim `tainted-website` anyway if you want it reserved; a name you did not take is one someone
+else can, and pip will happily install theirs. It is a defensive registration, not a
+publication, and `release.yml` will never upload to it.
+
+**Expect to be rate-limited.** PyPI throttles *new project creation* far more tightly than
+ordinary uploads — creating four projects in one `twine upload` returns `429 Too Many Requests`
+partway through. Uploads to projects that already exist are unaffected, so the way through is to
+create them a few at a time and re-run with `--skip-existing`, which passes over whatever
+already landed.
+
+`release.yml` uploads with **trusted publishing**, so there is no API token to store anywhere. For
+each of the four, on PyPI → *Your projects* → *Publishing* (or *Pending publishers* for a name
+that has never been uploaded to), add a publisher with:
+
+| Field | Value |
+|---|---|
+| Owner | `OWNER` |
+| Repository | `tainted` |
+| Workflow | `release.yml` |
+
+A name whose publisher is missing fails the upload job and nothing reaches PyPI — which is the
+right failure, since a half-published release is the one state pip cannot resolve.
+
+Note that PyPI allows only one *pending* publisher per configuration, so several names cannot be
+pre-registered against the same owner/repo/workflow at once. Publishing a project by hand once
+turns its pending entry into an ordinary per-project publisher and frees the slot — which is why
+the four above were bootstrapped with a manual `twine upload` rather than by tag.
 
 ## 1. Every release
 
@@ -45,23 +83,29 @@ after this point is what to do when you want one surface published on its own, b
 
 ## 2. CLI — a pip install and a pre-commit hook
 
-The engine is **not on PyPI** (nothing has been uploaded there yet), so the CLI is not
-installed by name from there either. Both wheels ship together on the Release, and a
-consumer installs both URLs:
+`tainted-cli` depends on `tainted==X.Y.Z`, so a consumer names one package and pip fetches
+both. To publish by hand — core first, always, or the surface is briefly unresolvable:
 
 ```bash
 python -m build --outdir dist .                 # tainted
 python -m build --outdir dist surfaces/cli      # tainted-cli
-gh release upload vX.Y.Z dist/tainted-X.Y.Z-py3-none-any.whl \
-                         dist/tainted_cli-X.Y.Z-py3-none-any.whl
+twine upload dist/tainted-X.Y.Z*                # the engine, alone and first
+twine upload dist/tainted_cli-X.Y.Z*
+gh release upload vX.Y.Z dist/*                 # the readable copy, not the install path
 ```
 
 What you tell a user:
 
 ```bash
-B=https://github.com/OWNER/tainted/releases/download/vX.Y.Z
-pip install "$B/tainted-X.Y.Z-py3-none-any.whl" "$B/tainted_cli-X.Y.Z-py3-none-any.whl"
+pip install tainted-cli
 tainted analyze ./my-app
+```
+
+For `prove`, they also want the browser the engine's `dynamic` extra carries — a surface cannot
+ask for an extra of its own dependency, so it stays a second command:
+
+```bash
+pip install "tainted[dynamic]" && playwright install chromium
 ```
 
 **The pre-commit hook rides on the same tag.** `.pre-commit-hooks.yaml` is at the repository
@@ -75,9 +119,9 @@ root — the only place pre-commit reads it — and is a `language: system` hook
       - id: tainted
 ```
 
-To publish on PyPI instead, the core has to go there too (`twine upload dist/*` for both, core
-first) and `surfaces/cli/pyproject.toml` gains `tainted==X.Y.Z` as a real dependency. Nothing
-else about the package changes.
+That pin is a fifth copy of the version number, alongside the four manifests.
+`tests/test_release_shape.py` checks it with the rest, so a forgotten bump fails the release
+rather than shipping a surface pinned to last month's engine.
 
 ## 3. CI — a GitHub Action
 
@@ -113,15 +157,15 @@ version by hand — which is the cost of the speed, and why it is not the defaul
 
 ## 4. MCP — a pip install and a client entry
 
-Same two-wheel shape as the CLI:
+Same shape as the CLI — core first:
 
 ```bash
 python -m build --outdir dist . && python -m build --outdir dist surfaces/mcp
-gh release upload vX.Y.Z dist/tainted-X.Y.Z-py3-none-any.whl \
-                         dist/tainted_mcp-X.Y.Z-py3-none-any.whl
+twine upload dist/tainted-X.Y.Z* && twine upload dist/tainted_mcp-X.Y.Z*
+gh release upload vX.Y.Z dist/*
 ```
 
-What a user puts in their client config, after installing both wheels:
+What a user puts in their client config, after `pip install tainted-mcp`:
 
 ```json
 { "mcpServers": { "tainted": { "command": "tainted-mcp" } } }
@@ -164,8 +208,9 @@ Four things about that command are the difference between a demo and a deploymen
 * **`GITHUB_OAUTH_REDIRECT` is required behind a proxy**, which is every hosted deployment.
   Derived from the request, the callback URL is the proxy's, not the one registered with
   GitHub, and sign-in fails with an opaque error.
-* **The image sets `TAINTED_REQUIRE_SANDBOX=1`, and `prove` will be refused until you stand up
-  the sandbox.** That is deliberate: `prove` runs untrusted, network-active exploits, and
+* **`tainted-web` defaults `TAINTED_REQUIRE_SANDBOX` to `1`, and `prove` will be refused until
+  you stand up the sandbox.** The entrypoint carries this, not the image, so it holds however
+  the server is started. That is deliberate: `prove` runs untrusted, network-active exploits, and
   `backend/sandbox.py` holds the client for a Cloudflare Browser Rendering / Containers worker
   **that is not in this repository** — you write the service, set `TAINTED_SANDBOX_URL` and
   `TAINTED_SANDBOX_TOKEN`, and the refusal lifts. The bundled `demo/demo` run contacts nothing
@@ -175,9 +220,11 @@ Four things about that command are the difference between a demo and a deploymen
 * **`FORWARDED_ALLOW_IPS`** must name your proxy (or `*` only when nothing else can reach the
   port), or uvicorn ignores `X-Forwarded-*` and the app builds http URLs behind your https.
 
-The image also runs as an unprivileged user, ships the Chromium `prove` drives, enforces the
-CSP rather than only reporting it, and has a `HEALTHCHECK` on `/healthz`. `.env.example`
-documents every remaining variable.
+`tainted-web` also defaults **`TAINTED_CSP_ENFORCE`** to `1`, so the Content-Security-Policy
+blocks rather than only reporting; set it to `0` to watch before blocking. Like the sandbox
+default it belongs to the entrypoint, not to the image, so it survives however you start the
+server. The image additionally runs as an unprivileged user, ships the Chromium `prove` drives,
+and has a `HEALTHCHECK` on `/healthz`. `.env.example` documents every remaining variable.
 
 ---
 

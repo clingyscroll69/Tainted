@@ -4,15 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tainted-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "Tainted local developer loop — analyze / watch / fix / pre-commit gate."
 requires-python = ">=3.11"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Tainted" }]
-# NOTE: the core engine (`tainted`) is installed alongside from the same repo — see
-# ../README.md. It is deliberately not listed here because it is not published to PyPI.
+# The core engine, pinned exactly: a surface and the engine it wraps are cut from one commit
+# and released under one number, so a range here would let pip assemble a pair that was never
+# tested together. `tests/test_release_shape.py` fails the release if this drifts from
+# `tainted.__version__`.
 dependencies = [
+    "tainted==0.1.1",
     "typer>=0.12",
     "rich>=13.0",
     "watchdog>=4.0",

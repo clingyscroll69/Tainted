@@ -4,15 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tainted-website"
-version = "0.1.0"
+version = "0.1.1"
 description = "Tainted demonstration website — FastAPI over the engine, cytoscape tool graph."
 requires-python = ">=3.11"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Tainted" }]
-# The core engine (`tainted`) is installed alongside from the same repo — see ../README.md.
-# Install the core with its dynamic extra so `prove` can drive a browser: pip install -e ".[dynamic]"
+# The core engine, pinned exactly — see the note in `surfaces/cli/pyproject.toml`. `prove` also
+# needs the browser the `dynamic` extra carries, which a dependency here cannot ask for on the
+# core's behalf without dragging Playwright into every install: `pip install "tainted[dynamic]"`.
 dependencies = [
+    "tainted==0.1.1",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "python-multipart>=0.0.9",

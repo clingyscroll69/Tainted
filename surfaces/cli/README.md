@@ -10,14 +10,25 @@ target or credentials needed):
 
 It also runs the interactive `fix` and can `prove` against a running target.
 
-## Deploy
+## Install
 
-From a repo that has the core (`tainted/`, root `pyproject.toml`) plus this folder:
+```bash
+pip install tainted-cli            # the engine comes with it, pinned to this version
+export GEMINI_API_KEY=...          # optional: turns on the LLM "meaning" register
+```
+
+`prove` additionally needs the browser the engine's `dynamic` extra carries. A package cannot
+request an extra of its own dependency, so that is a second command rather than a flag:
+
+```bash
+pip install "tainted[dynamic]" && playwright install chromium
+```
+
+From a checkout instead — the core is a sibling directory, not a release:
 
 ```bash
 pip install -e .                 # the core engine (repo root)
 pip install -e surfaces/cli      # this surface
-export GEMINI_API_KEY=...         # optional: turns on the LLM "meaning" register
 ```
 
 ## Use
@@ -68,7 +79,7 @@ So: install Tainted, then add this to the project's `.pre-commit-config.yaml`:
 
 ```yaml
 -   repo: https://github.com/OWNER/tainted
-    rev: v0.1.0
+    rev: v0.1.1
     hooks:
       - id: tainted
 ```

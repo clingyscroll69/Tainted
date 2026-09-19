@@ -42,13 +42,22 @@ are what the Dockerfile below is for. On a platform with a short function timeou
 `/tmp`, `analyze` will work and `prove` will not — lower the two limits and expect the rest to
 need re-architecting into a queued job.
 
-From a repo that has the core (`tainted/`, root `pyproject.toml`) plus this folder:
+**This surface is not on PyPI**, unlike the CLI and MCP ones. Nobody installs the website by
+name — it is run by whoever deploys it — so it ships as a wheel on the GitHub Release and as the
+container image below. Its wheel still pins the engine, so `tainted` comes with it:
+
+```bash
+pip install https://github.com/OWNER/tainted/releases/download/vX.Y.Z/tainted_website-X.Y.Z-py3-none-any.whl \
+            "tainted[dynamic]"                   # + the browser prove drives
+export GEMINI_API_KEY=...                        # optional
+tainted-web                                      # serves http://127.0.0.1:8000
+```
+
+From a checkout instead:
 
 ```bash
 pip install -e ".[dynamic]"          # core engine (+ the Playwright extra, for prove)
 pip install -e surfaces/website       # this surface
-export GEMINI_API_KEY=...              # optional
-tainted-web                            # serves http://127.0.0.1:8000
 ```
 
 Or containerized (build context = repo root):
@@ -58,17 +67,25 @@ docker build -f surfaces/website/Dockerfile -t tainted-web .
 docker run -p 8000:8000 -e GEMINI_API_KEY=$GEMINI_API_KEY tainted-web
 ```
 
-The image is the production entrypoint, and it differs from the dev server on four points that
-are each a deployment decision rather than a preference:
+`tainted-web` defaults **`TAINTED_REQUIRE_SANDBOX=1`** whichever way it is started, so a real
+`prove` is refused until `TAINTED_SANDBOX_URL` / `TAINTED_SANDBOX_TOKEN` point at a sandbox.
+**The worker they point at is not in this repository** — `backend/sandbox.py` is the client for
+it. The bundled demo contacts nothing and is exempt, so the whole loop still demonstrates
+untouched. To accept in-process execution on your own metal, set `TAINTED_REQUIRE_SANDBOX=0` and
+say so out loud. That default lives in `backend/run.py` rather than in the image on purpose: as
+a property of the image it would have been deleted along with it.
+
+It defaults **`TAINTED_CSP_ENFORCE=1`** the same way and for the same reason, so the CSP blocks
+rather than only reporting. The policy already allows `unsafe-inline` for the inline script and
+style this page carries, so there is nothing for a watching period to find; `=0` asks for
+report-only.
+
+The image differs from the dev server on two further points, each a deployment decision rather
+than a preference:
 
 - it ships the **Chromium** `prove` drives, not only the Playwright client that drives it;
 - it runs as an **unprivileged user** — `prove` executes untrusted, network-active code, and as
-  uid 0 a process escape and a container escape are the same event;
-- it sets **`TAINTED_REQUIRE_SANDBOX=1`**, so a real `prove` is refused until
-  `TAINTED_SANDBOX_URL` / `TAINTED_SANDBOX_TOKEN` point at a sandbox. **The worker they point at
-  is not in this repository** — `backend/sandbox.py` is the client for it. The bundled demo
-  contacts nothing and is exempt, so the container still demonstrates the whole loop untouched;
-- it **enforces** the CSP rather than sending it report-only.
+  uid 0 a process escape and a container escape are the same event.
 
 `PUBLISHING.md` §5 has the full `docker run`, and what each variable costs to get wrong.
 

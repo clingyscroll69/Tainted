@@ -52,7 +52,18 @@ Every report says which checks were proven and which were only analyzed. Without
 a report with no proof column reads as a clean bill of health when it might just mean
 nothing was tried.
 
-## Setup
+## Install
+
+```bash
+pip install tainted-cli          # the local loop: analyze / watch / fix / pre-commit gate
+pip install tainted-mcp          # the same operations as tools for a coding agent
+pip install "tainted[dynamic]"   # + the browser `prove` drives, for either of the above
+```
+
+Each surface pins the engine, so `tainted` arrives with it. The CI surface is a GitHub Action
+rather than a package — `surfaces/ci/README.md`.
+
+## Setup (from a checkout)
 
 ```bash
 pip install -e ".[dev]"          # core engine + tests
@@ -70,6 +81,10 @@ pip install -e ".[dev-all]"                      # core + pytest + ruff + mypy
 pip install -e surfaces/cli -e surfaces/ci \
             -e surfaces/mcp -e surfaces/website  # the four surfaces
 ```
+
+The core goes first and that is now load-bearing: each surface declares `tainted==X.Y.Z`,
+so a surface installed into an empty environment fetches the engine from PyPI instead of
+using the checkout you are editing.
 
 Tainted reads the Gemini key from the `GEMINI_API_KEY` environment variable or `.env`.
 It is never hardcoded. Without it, static analysis still runs in full; only the
@@ -97,7 +112,7 @@ two lines from Setup above, so a command that works in CI works on your machine.
 
 ## Shipping it
 
-Each surface is a different kind of artifact: the CLI and MCP server are pip installs, the CI
+Each surface is a different kind of artifact: the CLI and MCP server are PyPI packages, the CI
 surface is a GitHub Action, the website is a container image. **`PUBLISHING.md`** has one
 section per surface and the single tag that publishes all four
 (`.github/workflows/release.yml`).

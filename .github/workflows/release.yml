@@ -55,8 +55,9 @@ jobs:
     uses: ./.github/workflows/test.yml
 
   # ------------------------------------------------------------------------- #
-  # CLI and MCP: Python packages. The core ships alongside them, because it is not on PyPI
-  # and both surfaces import it — an installer needs all three wheels from one place.
+  # CLI and MCP: Python packages, published to PyPI so a consumer writes `pip install tainted-cli`
+  # and pip resolves the engine itself. The wheels still go onto the Release as well — PyPI is
+  # where the install comes from, the Release is what you can read and check by hand.
   # ------------------------------------------------------------------------- #
   packages:
     needs: [version, test]
@@ -90,6 +91,49 @@ jobs:
         with:
           name: distributions
           path: dist/*
+
+  # ------------------------------------------------------------------------- #
+  # PyPI, and the order matters. Every surface pins `tainted==X.Y.Z` exactly, so a surface
+  # uploaded before the engine is one pip cannot resolve — for however many seconds the second
+  # upload takes, and permanently if it fails. The core goes up alone and first.
+  #
+  # **Four names, not five: `tainted-website` is deliberately not on PyPI.** Nobody installs the
+  # website by name — it is run by whoever deploys it, from the Release wheel or a checkout — so
+  # a PyPI project for it would be a name to maintain for an install path no one takes. Its wheel
+  # still ships on the Release, and it still pins the engine like the others.
+  #
+  # Trusted publishing (OIDC): no API token is stored here. Each of the four project names must
+  # name this repository and this workflow as a trusted publisher on PyPI first — PUBLISHING.md
+  # §0 has the one-time setup. `id-token: write` is what mints the identity.
+  # ------------------------------------------------------------------------- #
+  pypi:
+    needs: [version, packages]
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: "Separate the engine from the surfaces"
+        run: |
+          set -euo pipefail
+          mkdir -p core rest
+          mv dist/tainted-*.whl dist/tainted-*.tar.gz core/
+          rm -f dist/tainted_website-*          # not published to PyPI; Release-only
+          mv dist/* rest/
+          ls core rest
+      # `skip-existing` so a release that failed halfway can simply be re-run: the files that
+      # already landed are passed over instead of failing the job on "file already exists".
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: core
+          skip-existing: true
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: rest
+          skip-existing: true
 
   # ------------------------------------------------------------------------- #
   # CI and website: container images.
@@ -132,7 +176,7 @@ jobs:
   # from a release whose tag holds an `action.yml` at the repository root.
   # ------------------------------------------------------------------------- #
   release:
-    needs: [version, packages, images]
+    needs: [version, packages, images, pypi]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -151,9 +195,10 @@ jobs:
           files: dist/*
           generate_release_notes: true
           body: |
-            Install the CLI or the MCP server (the engine ships alongside; it is not on PyPI):
+            Install the CLI or the MCP server (the engine comes with it):
 
-                pip install <core wheel URL> <surface wheel URL>
+                pip install tainted-cli==${{ needs.version.outputs.version }}
+                pip install tainted-mcp==${{ needs.version.outputs.version }}
 
             Run a surface as a container:
 

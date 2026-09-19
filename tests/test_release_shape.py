@@ -60,3 +60,23 @@ def test_the_surfaces_do_not_depend_on_each_other():
                 assert f"import {other}" not in text, (
                     f"{path.relative_to(ROOT)} imports {other}; surfaces deploy separately"
                 )
+
+
+SURFACE_MANIFESTS = MANIFESTS[1:]  # the four surfaces; MANIFESTS[0] is the engine itself
+
+
+@pytest.mark.parametrize("manifest", SURFACE_MANIFESTS, ids=lambda p: p.parent.name)
+def test_every_surface_pins_the_engine_it_was_tested_against(manifest):
+    """The surfaces are on PyPI, so pip resolves `tainted` rather than finding it alongside.
+
+    An unpinned dependency would let pip pair a surface with any engine it can reach, including
+    one released years later. A range would do the same thing more slowly. The pin is exact, and
+    that makes it a fifth copy of the version number — so it is checked here with the other four
+    rather than trusted to a release checklist.
+    """
+    deps = tomllib.loads(manifest.read_text(encoding="utf-8"))["project"]["dependencies"]
+    pins = [d for d in deps if d.split("[")[0].split("=")[0].split(">")[0].strip() == "tainted"]
+    assert pins == [f"tainted=={tainted.__version__}"], (
+        f"{manifest.relative_to(ROOT)} pins {pins or 'nothing'}, "
+        f"the engine says {tainted.__version__}"
+    )

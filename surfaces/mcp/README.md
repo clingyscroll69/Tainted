@@ -79,15 +79,19 @@ HTTP calls are also constrained by the engine's **plan-commitment** self-defense
 `prove` commits to its list of probes up front, and any request outside that list is
 refused (`blocked_calls` lists what got refused).
 
-## Deploy
-
-From a repo that has the core (`tainted/`, root `pyproject.toml`) plus this folder:
+## Install
 
 ```bash
-pip install -e .                 # core engine
-pip install -e surfaces/mcp      # this surface
+pip install tainted-mcp            # the engine comes with it, pinned to this version
 export GEMINI_API_KEY=...          # optional
 tainted-mcp                        # runs a stdio MCP server
+```
+
+Add `pip install "tainted[dynamic]" && playwright install chromium` for `prove`. From a
+checkout instead:
+
+```bash
+pip install -e . && pip install -e surfaces/mcp
 ```
 
 Register it with an MCP client (for example Claude Desktop or Claude Code):
