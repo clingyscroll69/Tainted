@@ -80,8 +80,10 @@ class Executor(Protocol):
 
 
 class LocalExecutor:
-    """Runs in-process. Correct for `analyze`, and for `prove` only where the caller has said
-    out loud that it accepts an uncontained run — see `TAINTED_REQUIRE_SANDBOX`."""
+    """Runs in-process. Correct for `analyze`. For `prove`, correct only inside the sandbox
+    container itself (see `tainted.execution.container_main`), where in-process IS the
+    containment — a surface on the host has no configuration that turns an uncontained `prove`
+    back on; `default_executor()` always returns `DockerExecutor`."""
 
     sandboxed = False
     streams = True

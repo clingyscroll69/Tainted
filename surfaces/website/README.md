@@ -20,11 +20,13 @@ hidden and nothing else on the page notices.
 ## Execution sandbox
 
 `prove` runs untrusted, network-active exploits — the one part of this surface
-that's reckless to run in-process. `backend/sandbox.py` is the seam: `LocalExecutor` runs
-in-process (for dev and demos), and `DockerExecutor` spawns one `tainted-sandbox` container
-per run, as a sibling of the server process. The backend only depends on the `Executor`
-protocol, so swapping one for the other is a one-line change, and `tainted-web` defaults to
-`DockerExecutor` via `TAINTED_REQUIRE_SANDBOX=1` (see below).
+that's reckless to run in-process. `backend/sandbox.py` is the seam: `default_executor()`
+always returns `DockerExecutor`, which spawns one `tainted-sandbox` container per run, as a
+sibling of the server process. There is no configuration that makes this deployment run
+`prove` in-process instead — `TAINTED_REQUIRE_SANDBOX` only governs whether the app offers
+`prove` at all when Docker turns out not to be available (see below), it does not select an
+executor. `LocalExecutor` still exists in the engine, but only the sandbox container itself
+runs it (that is what "in-process IS the containment" means once you're already inside).
 
 **macOS: `prove` needs host networking.** The sandbox container reaches your app on
 `localhost`, which on macOS crosses a VM boundary. Docker Desktop 4.34+ can do it (sign in, then
@@ -79,9 +81,12 @@ docker pull ghcr.io/OWNER/tainted-sandbox:X.Y.Z
 ```
 
 The bundled demo contacts nothing and is exempt, so the whole loop still demonstrates without
-Docker. To accept in-process execution on your own metal, set `TAINTED_REQUIRE_SANDBOX=0` and
-say so out loud. That default lives in `backend/run.py`'s `apply_deployment_defaults()` rather
-than in any image, so it holds however the server is started.
+Docker. There is no setting that accepts an in-process run instead: `TAINTED_REQUIRE_SANDBOX=0`
+only turns off the pre-check that refuses `prove` with a 503 when Docker is missing — it never
+makes `default_executor()` return anything but `DockerExecutor`. If Docker is not available on
+this host, `prove` fails; the fix is to install Docker and pull the image, not to flip this
+variable. That default lives in `backend/run.py`'s `apply_deployment_defaults()` rather than in
+any image, so it holds however the server is started.
 
 It defaults **`TAINTED_CSP_ENFORCE=1`** the same way and for the same reason, so the CSP blocks
 rather than only reporting. The policy already allows `unsafe-inline` for the inline script and
