@@ -14,12 +14,14 @@ image `DockerExecutor` spawns, not this surface.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
+from backend import app as app_module
 from backend.app import app
+from tainted.execution.docker import DockerExecutor
 
 # --------------------------------------------------------------------------- #
 # The one thing a fail-closed deployment must still be able to do
@@ -39,23 +41,48 @@ def test_the_demo_still_runs_when_sandboxing_is_required(monkeypatch):
     assert resp.json()["findings"]
 
 
-@pytest.mark.parametrize("field", ["repo", "repo_path"])
-def test_a_real_prove_is_refused_rather_than_run_on_our_own_metal(monkeypatch, field):
-    """`default_executor()` always returns `DockerExecutor`, so there is no longer a
-    "misconfigured, refuse before touching anything" gate to hit a single status code on: the
-    `repo` field is refused for lacking a GitHub session (401) before execution is even
-    reached, and the `repo_path` field reaches `DockerExecutor`, which — with no sandbox image
-    built in this test environment — fails to spawn its container and answers 502. Both are
-    refusals: neither path lets `prove` run the exploit against this process's own filesystem
-    and network, which is the one thing this test exists to rule out."""
+class _FailingRunner:
+    """Stands in for a Docker daemon this test must never actually shell out to.
+
+    `default_executor()` now unconditionally returns a live `DockerExecutor`, and `app.py`
+    binds `_executor` at import time — so a naive `/api/prove` POST with a real target would
+    reach `subprocess.Popen(["docker", "run", ...])` on whatever machine runs the suite. On a
+    box with the daemon down that raises and this test would pass for an incidental reason; on
+    a box with the sandbox image built, it would actually spawn a container that fires at
+    `http://localhost:9`. Injecting this runner keeps the test hermetic and pins the *reason*
+    it fails: `DockerExecutor` catching `CalledProcessError` and turning it into
+    `SandboxUnavailable`, never a completed local run.
+    """
+
+    def run(self, argv, stdin, env):
+        raise subprocess.CalledProcessError(1, argv, output=None, stderr=b"no such daemon")
+        yield  # pragma: no cover - unreachable; satisfies the Runner protocol's Iterator return
+
+
+def test_a_real_prove_is_refused_rather_than_run_on_our_own_metal(monkeypatch):
+    """The `repo_path` field, in local mode, reaches `DockerExecutor` — the one path in this
+    surface where `prove` would otherwise run untrusted code. Stubbing the runner means this
+    test is exercising *our* refusal (`DockerExecutor` -> `SandboxUnavailable` -> 502), not the
+    host's Docker state, and it can actually fail if that refusal is ever lost: if `_argv` or
+    `_consume` changed shape so the exploit ran before the runner's failure surfaced, the
+    injected runner would either not be reached or the response would stop being a 502.
+
+    The `repo` field is not tested here: it is refused by the GitHub-session check (401) before
+    execution is ever reached, which proves the auth gate works and nothing about sandboxing —
+    see `test_api_gating.py` for that gate's own tests.
+    """
     monkeypatch.setenv("TAINTED_REQUIRE_SANDBOX", "1")
     monkeypatch.setenv("TAINTED_LOCAL_MODE", "1")
+    monkeypatch.setattr(
+        app_module, "_executor", DockerExecutor(network="bridge", runner=_FailingRunner())
+    )
     client = TestClient(app)
     resp = client.post(
         "/api/prove",
-        json={field: "owner/name" if field == "repo" else "/tmp", "url": "http://localhost:9"},
+        json={"repo_path": "/tmp", "url": "http://localhost:9"},
     )
-    assert resp.status_code in (401, 502, 503), resp.text
+    assert resp.status_code == 502, resp.text
+    assert "sandbox container failed to start" in resp.json()["detail"].lower()
 
 
 # --------------------------------------------------------------------------- #
