@@ -243,9 +243,15 @@ def watch(
     skip: Optional[str] = typer.Option(None),
 ):
     """Re-run analyze each time a watched file changes."""
-    from tainted_cli.watch import watch_repo
+    from tainted_cli.watch import refusal_reason, watch_repo
 
-    watch_repo(str(repo), only=_parse_checks(only), skip=_parse_checks(skip))
+    wanted = _parse_checks(only)
+    # Refused here rather than deep in the loop, so the flag fails like a flag: a usage error
+    # before anything is scanned or watched.
+    reason = refusal_reason(wanted)
+    if reason:
+        raise typer.BadParameter(reason)
+    watch_repo(str(repo), only=wanted, skip=_parse_checks(skip))
 
 
 @app.command()

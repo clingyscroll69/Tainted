@@ -45,7 +45,7 @@ folder and runs those two installs.
 
 | Folder | Surface | Operations | Deploy target |
 |---|---|---|---|
-| `cli/` | Local developer loop (Typer) | `analyze`, `watch`, interactive `fix`, pre-commit gate | developer machine |
+| `cli/` | Local developer loop (Typer) | `analyze`, `watch`, `prove`, interactive `fix`, pre-commit gate | developer machine |
 | `ci/` | CI — where proof happens | `analyze` + `prove` + `fix`-as-PR | GitHub Actions / GitLab CI |
 | `mcp/` | The agent (MCP) | sync `analyze` tools, async `prove` job, interactive `fix` | stdio / SSE MCP server |
 | `website/` | The demonstration (FastAPI) | `analyze` + `prove` + patch download | long-lived container |
@@ -53,7 +53,8 @@ folder and runs those two installs.
 **Publishing any of them: `PUBLISHING.md`** — one section per surface, plus the tag that does all four.
 
 Only **CI** reliably has a running app to attack, so it's the surface where
-`prove` runs by default. The **CLI** and **website** work fine with no target: the CLI
-just runs `analyze`, and the website hands back a patch instead of applying it. The
+`prove` runs by default; the CLI has `tainted prove` too, but you point it at a target
+yourself. The **CLI** and **website** work fine with no target: the CLI falls back to
+`analyze` and `watch`, and the website hands back a patch instead of applying it. The
 **MCP** `prove` tool is guarded by the engine's plan-commitment self-defense
 (`tainted/selfdefense/`).
