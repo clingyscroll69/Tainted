@@ -42,6 +42,29 @@ def test_an_unexpected_exception_is_reported_as_error(monkeypatch):
     assert code == 1
 
 
+def test_llm_expected_but_missing_refuses_instead_of_running_thinner(monkeypatch):
+    """Finding B2, part 2. The host had a usable LLM and the container resolves none — the
+    key did not cross. Running anyway would silently re-rank every finding on Structure alone
+    and hand back a report that looks complete but is missing the register the host already
+    showed the user via `analyze`. This must be a loud terminal error, not a thinner report."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr("tainted.execution.base.get_default_client", lambda reload=False: type(
+        "_NoLLM", (), {"available": False}
+    )())
+    out = io.StringIO()
+    req = {
+        "repo_path": "/repo",
+        "setup": {"target": {"url": "http://localhost:3000"}},
+        "ownership_verified": True,
+        "llm_expected": True,
+    }
+    code = main(io.StringIO(json.dumps(req)), out, {})
+    events = _lines(out)
+    assert events[-1]["kind"] == "error"
+    assert "did not reach this container" in events[-1]["message"]
+    assert code == 1
+
+
 def test_a_malformed_run_key_is_reported_as_error():
     """A corrupted TAINTED_RUN_KEY must emit an error event, not die silently."""
     out = io.StringIO()

@@ -42,8 +42,27 @@ def _plan_from(raw: Optional[dict[str, Any]]) -> Optional[ProbePlan]:
     )
 
 
+class LLMExpectedButMissing(RuntimeError):
+    """The host had a usable LLM and the container does not. See `_run`."""
+
+
 def _run(req: RunRequest, key: Optional[bytes], out: TextIO) -> ProveOutcome:
-    from tainted.execution.base import LocalExecutor
+    from tainted.execution.base import LocalExecutor, _llm_or_none
+
+    if req.llm_expected and _llm_or_none() is None:
+        # The host ranked candidates with the meaning register — that is what `analyze`
+        # already showed the user — and resolved no LLM here means the key did not cross the
+        # container boundary (blocked env var, missing image build arg, whatever). Running
+        # anyway would silently re-rank everything on Structure alone and hand back a report
+        # that looks complete but is missing the register the user was already shown. That is
+        # exactly the false-negative shape this tool exists to not produce, so this refuses
+        # instead of degrading.
+        raise LLMExpectedButMissing(
+            "The host has a configured LLM but GEMINI_API_KEY did not reach this container. "
+            "Running would silently rank findings without the meaning register the host "
+            "already showed you, which is a different (and weaker) result than the one you "
+            "were shown, not the same one running more safely."
+        )
 
     setup = ProveSetup.model_validate(req.setup)
     # Inside the container, in-process IS the containment. LocalExecutor is the right executor

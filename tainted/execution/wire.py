@@ -28,6 +28,12 @@ class RunRequest(BaseModel):
     # whatever the caller logged the request into.
     plan: Optional[dict[str, Any]] = None
     plan_signature: Optional[str] = None
+    # Whether the host that spawned this container had a usable LLM client. The container has
+    # no way to see the host's own environment or config beyond what crossed with it, so this
+    # is what lets it tell "no LLM configured anywhere" apart from "the key didn't cross the
+    # boundary" — the second one must be a loud error, not a quietly thinner report ranked
+    # without the meaning register the host already showed the user via `analyze`.
+    llm_expected: bool = False
 
 
 def encode_event(kind: str, **payload: Any) -> str:
