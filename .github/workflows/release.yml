@@ -97,10 +97,10 @@ jobs:
   # uploaded before the engine is one pip cannot resolve — for however many seconds the second
   # upload takes, and permanently if it fails. The core goes up alone and first.
   #
-  # **Four names, not five: `tainted-website` is deliberately not on PyPI.** Nobody installs the
-  # website by name — it is run by whoever deploys it, from the Release wheel or a checkout — so
-  # a PyPI project for it would be a name to maintain for an install path no one takes. Its wheel
-  # still ships on the Release, and it still pins the engine like the others.
+  # **The website is deliberately not on PyPI.** Nobody installs the website by name — it is run
+  # by whoever deploys it, from the Release wheel or a checkout — so a PyPI project for it would
+  # be a name to maintain for an install path no one takes. Its wheel still ships on the Release,
+  # and it still pins the engine like the others.
   #
   # Trusted publishing (OIDC): no API token is stored here. Each of the four project names must
   # name this repository and this workflow as a trusted publisher on PyPI first — PUBLISHING.md
@@ -150,8 +150,10 @@ jobs:
         include:
           - surface: ci
             image: tainted-ci
-          - surface: website
-            image: tainted-web
+            dockerfile: surfaces/ci/Dockerfile
+          - surface: sandbox
+            image: tainted-sandbox
+            dockerfile: Dockerfile.sandbox
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -163,7 +165,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: surfaces/${{ matrix.surface }}/Dockerfile
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.version.outputs.version }}
@@ -200,9 +202,7 @@ jobs:
                 pip install tainted-cli==${{ needs.version.outputs.version }}
                 pip install tainted-mcp==${{ needs.version.outputs.version }}
 
-            Run a surface as a container:
-
-                docker run ghcr.io/${{ github.repository_owner }}/tainted-web:${{ needs.version.outputs.version }}
+            Run the website from its wheel on a host with Docker; `prove` runs in `tainted-sandbox` containers.
 
             Use the Action:
 

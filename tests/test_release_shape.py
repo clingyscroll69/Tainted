@@ -16,6 +16,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+import yaml
 
 import tainted
 
@@ -23,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFESTS = [ROOT / "pyproject.toml"] + [
     ROOT / "surfaces" / name / "pyproject.toml" for name in ("cli", "ci", "mcp", "website")
 ]
+WORKFLOW = ROOT / ".github/workflows/release.yml"
 
 
 @pytest.mark.parametrize("manifest", MANIFESTS, ids=lambda p: p.parent.name)
@@ -80,3 +82,16 @@ def test_every_surface_pins_the_engine_it_was_tested_against(manifest):
         f"{manifest.relative_to(ROOT)} pins {pins or 'nothing'}, "
         f"the engine says {tainted.__version__}"
     )
+
+
+def test_the_release_builds_the_sandbox_image_and_not_a_website_one():
+    """The project still ships exactly two images; tainted-sandbox replaces tainted-web."""
+    wf = yaml.safe_load(WORKFLOW.read_text())
+    images = [e["image"] for e in wf["jobs"]["images"]["strategy"]["matrix"]["include"]]
+    assert sorted(images) == ["tainted-ci", "tainted-sandbox"]
+    assert "tainted-web" not in images
+
+
+def test_the_release_notes_do_not_tell_anyone_to_docker_run_the_website():
+    """The release notes must not tell anyone to docker run a website image that no longer exists."""
+    assert "tainted-web" not in WORKFLOW.read_text()
