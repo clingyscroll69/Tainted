@@ -17,85 +17,25 @@ and the website's production entrypoint sets it.
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional, Protocol
+from typing import Optional
 
 import httpx
 
-from tainted import analyze as core_analyze
-from tainted import prove as core_prove
 from tainted.dynamic.target import ProveSetup
-from tainted.llm.gemini import get_default_client
-from tainted.models import Candidate, Finding
-from tainted.report import Report, build_report
+from tainted.models import Finding
+from tainted.report import Report
 
-# The two progress observers a `prove` may accept. They are how a surface reports a run *while it
-# happens*: `OnCandidates` fires once, with what the run is about to attempt; `OnFinding` fires
-# once per result, as that result exists. Neither may influence the run — see
-# `tainted.orchestrator.prove`. An executor that cannot observe its own run ignores both, and the
-# caller must be able to tell the difference, which is what `streams` below is for.
-OnCandidates = Callable[[list[Candidate]], None]
-OnFinding = Callable[[Finding], None]
+from tainted.execution.base import (  # noqa: F401 - re-exported for this surface
+    Executor,
+    LocalExecutor,
+    OnCandidates,
+    OnFinding,
+    ProveOutcome,
+    SandboxUnavailable,
+    _llm_or_none,
+)
 
 _DISPATCH_TIMEOUT_S = 600
-
-
-class SandboxUnavailable(RuntimeError):
-    """Raised when a sandboxed run was required and the sandbox could not be reached."""
-
-
-class Executor(Protocol):
-    # `streams` is the executor's own answer to "can you report this run as it happens?".
-    # A surface reads it rather than inferring from whether callbacks fired, because "no events
-    # yet" and "no events ever" are different things and a progress indicator that confuses them
-    # claims to know something it does not.
-    streams: bool
-
-    def analyze(self, repo_path: str) -> Report: ...
-    def prove(
-        self,
-        repo_path: str,
-        setup: ProveSetup,
-        ownership_verified: bool,
-        on_candidates: Optional[OnCandidates] = None,
-        on_finding: Optional[OnFinding] = None,
-    ) -> Report: ...
-
-
-def _llm_or_none():
-    llm = get_default_client(reload=True)
-    return llm if llm.available else None
-
-
-class LocalExecutor:
-    """Runs in-process. Correct for local dev and for `analyze`; not for untrusted `prove`."""
-
-    sandboxed = False
-    # In-process, so the run is observable: the candidates are known the moment the static pass
-    # ends, and each finding as `core_prove` produces it.
-    streams = True
-
-    def analyze(self, repo_path: str) -> Report:
-        return build_report(core_analyze(repo_path, llm=_llm_or_none()))
-
-    def prove(
-        self,
-        repo_path: str,
-        setup: ProveSetup,
-        ownership_verified: bool,
-        on_candidates: Optional[OnCandidates] = None,
-        on_finding: Optional[OnFinding] = None,
-    ) -> Report:
-        llm = _llm_or_none()
-        result = core_analyze(repo_path, llm=llm, target=setup.target)
-        # In ranked order, because that is the order they will be attempted in. A surface that
-        # draws them in some other order is drawing its own order, not the run's.
-        if on_candidates is not None:
-            on_candidates(result.ranked())
-        findings: list[Finding] = core_prove(
-            result, setup, ownership_verified=ownership_verified, llm=llm,
-            on_finding=on_finding,
-        )
-        return build_report(result, findings)
 
 
 class CloudflareExecutor:
@@ -139,7 +79,7 @@ class CloudflareExecutor:
         ownership_verified: bool,
         on_candidates: Optional[OnCandidates] = None,
         on_finding: Optional[OnFinding] = None,
-    ) -> Report:
+    ) -> ProveOutcome:
         # Accepted and ignored — see the class docstring. Nothing crosses the worker boundary
         # until the run is over, so there is no honest event to emit before then.
         try:
@@ -162,11 +102,12 @@ class CloudflareExecutor:
                 f"The prove sandbox returned {resp.status_code}: {resp.text[:300]}"
             )
         try:
-            return Report.model_validate(resp.json())
+            report = Report.model_validate(resp.json())
         except Exception as exc:
             raise SandboxUnavailable(
                 f"The prove sandbox returned a payload that is not a Report: {exc}"
             ) from exc
+        return ProveOutcome(report=report)
 
     def close(self) -> None:
         self._client.close()

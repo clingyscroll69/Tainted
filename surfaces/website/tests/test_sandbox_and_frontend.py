@@ -71,9 +71,9 @@ def test_cloudflare_executor_marshals_a_report_back():
         "https://sandbox.example", "tok",
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
-    report = executor.prove("/repo", _setup(), ownership_verified=True)
+    outcome = executor.prove("/repo", _setup(), ownership_verified=True)
 
-    assert report.summary.proven == 1
+    assert outcome.report.summary.proven == 1
     assert captured["url"] == "https://sandbox.example/prove"
     assert captured["auth"] == "Bearer tok"
 

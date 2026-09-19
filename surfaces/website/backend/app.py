@@ -667,17 +667,17 @@ def api_prove(req: ProveRequest, request: Request):
             return _stream_prove(
                 lambda **hooks: _executor.prove(
                     repo_path, setup, ownership_verified=True, **hooks
-                ),
+                ).report,
                 streams=bool(getattr(_executor, "streams", False)),
                 cleanup=stack.close,
             )
 
         try:
             with _checkout(req, request) as repo_path:
-                report = _executor.prove(repo_path, setup, ownership_verified=True)
+                outcome = _executor.prove(repo_path, setup, ownership_verified=True)
         except SandboxUnavailable as exc:
             raise HTTPException(502, str(exc))
-        return JSONResponse(report.model_dump(mode="json"))
+        return JSONResponse(outcome.report.model_dump(mode="json"))
     finally:
         if not handed_to_stream:
             _prove_slots.release()
