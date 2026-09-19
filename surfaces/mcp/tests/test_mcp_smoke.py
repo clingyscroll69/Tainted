@@ -52,4 +52,4 @@ def test_prove_refuses_unverified_remote():
         login_b="c:d",
     )
     assert out.get("job_id") is None
-    assert "ownership" in out.get("error", "").lower()
+    assert "local" in out.get("error", "").lower()

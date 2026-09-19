@@ -15,19 +15,15 @@ from mcp.server.mcpserver import MCPServer
 from tainted import __version__ as tainted_version
 from tainted import analyze as core_analyze
 from tainted import fix as core_fix
-from tainted import prove as core_prove
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
 from tainted.fix import InterviewAnswer, tool_plane_interview
 from tainted.llm.gemini import get_default_client
 from tainted.models import Check, Finding
-from tainted.ownership import verify
 from tainted.report import build_report, select_candidate
 from tainted.selfdefense import PlanViolation
 from tainted.execution.guard import (
     build_probe_plan,
     commit_plan,
-    guarded_prober,
-    guarded_replay,
     new_run_key,
 )
 
@@ -154,25 +150,24 @@ def tainted_prove_start(
     login_b: str,
     seed: str = "",
     anon_key: str = "",
-    ownership_token: str = "",
 ) -> dict:
     setup = _build_setup(url, login_a, login_b, seed, anon_key)
 
-    # Ownership gate: local implies control; otherwise require a verified token.
-    verified = setup.target.is_local
-    if not verified and ownership_token:
-        verified = bool(verify(setup.target, expected_token=ownership_token))
-    if not verified:
+    # Localhost only. MCP is an internal-use tool pointed at an in-development instance, so
+    # there is no legitimate non-local target and therefore no token path to offer.
+    if not setup.target.is_local:
         return {
-            "error": "ownership not verified for a non-local target — refusing to prove.",
+            "error": f"{setup.target.url} is not local — MCP proves against an app running on "
+                     f"this machine. Refusing.",
             "job_id": None,
         }
 
     # Commit to the probe plan BEFORE anything touches the target. Everything the run does
     # afterwards is checked against this; nothing it "decides" after reading target content
-    # can widen it.
-    plan = build_probe_plan(setup)
+    # can widen it. The key is per-run, because the plan is now enforced inside a container —
+    # a different process, which a per-process key could never verify against.
     key = new_run_key()
+    plan = build_probe_plan(setup)
     signature = commit_plan(plan, key)
 
     job_id = uuid.uuid4().hex
@@ -216,25 +211,25 @@ def tainted_prove_result(job_id: str) -> dict:
 def _run_prove(job_id: str, repo_path: str, setup: ProveSetup) -> None:
     job = _JOBS[job_id]
     try:
-        llm = _llm_or_none()
-        result = core_analyze(repo_path, llm=llm)
-        # Live calls are constrained by the committed probe plan (self-defense). The plan is
-        # re-verified here, on the far side of the thread boundary it just crossed.
-        replay, guard = guarded_replay(setup, job.plan, job.plan_signature, job.run_key)
-        findings = core_prove(
-            result,
+        from tainted.execution.docker import DockerExecutor
+
+        # Host networking: the target is always localhost, so `localhost` inside the container
+        # must be this machine's localhost. Nothing rewrites the URL.
+        outcome = DockerExecutor(network="host").prove(
+            repo_path,
             setup,
-            replay=replay,
-            ownership_verified=True,
-            llm=llm,
-            prober=guarded_prober(setup, guard),
+            ownership_verified=True,  # derived: the gate above proved the target is local
+            plan=job.plan,
+            plan_signature=job.plan_signature,
+            run_key=job.run_key,
         )
-        job.report = build_report(result, findings).model_dump(mode="json")
-        job.blocked_calls = guard.blocked_calls
+        job.report = outcome.report.model_dump(mode="json")
+        job.blocked_calls = outcome.blocked_calls
         job.status = "done"
     except PlanViolation as exc:
-        # Not an error: the guard did its job. Say so distinctly, so a refusal is never read
-        # as a crash and quietly retried.
+        # Not an error: the guard did its job — inside the container, and reported back as a
+        # distinct terminal event. Say so distinctly, so a refusal is never read as a crash
+        # and quietly retried.
         job.error = str(exc)
         job.blocked_calls = [{"refused": str(exc)}]
         job.status = "refused"
