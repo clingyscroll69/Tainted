@@ -112,6 +112,14 @@ class LocalExecutor:
         if on_candidates is not None:
             on_candidates(result.ranked())
 
+        supplied = [plan is not None, plan_signature is not None, run_key is not None]
+        if any(supplied) and not all(supplied):
+            raise ValueError(
+                "A guarded run needs the plan, its signature and the run key together. "
+                "Got a partial set, which would otherwise have run unguarded — refusing "
+                "rather than quietly downgrading the containment the caller asked for."
+            )
+
         replay = prober = None
         guard = None
         if plan is not None and plan_signature is not None and run_key is not None:

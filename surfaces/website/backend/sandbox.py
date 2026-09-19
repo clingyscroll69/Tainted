@@ -22,7 +22,6 @@ from typing import Optional
 import httpx
 
 from tainted.dynamic.target import ProveSetup
-from tainted.models import Finding
 from tainted.report import Report
 
 from tainted.execution.base import (  # noqa: F401 - re-exported for this surface
