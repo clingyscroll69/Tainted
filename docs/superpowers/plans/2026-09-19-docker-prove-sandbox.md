@@ -55,7 +55,7 @@ Three points where the spec is wrong or silent. Each is implemented as written b
 # tests/test_execution_guard.py
 import pytest
 
-from tainted.dynamic.target import ProveSetup, Target
+from tainted.dynamic.target import Account, ProveSetup, Target
 from tainted.execution.guard import (
     build_probe_plan,
     commit_plan,
@@ -68,8 +68,8 @@ from tainted.selfdefense import PlanViolation
 def _setup() -> ProveSetup:
     return ProveSetup(
         target=Target(url="http://localhost:3000"),
-        login_a=("a@example.com", "pw"),
-        login_b=("b@example.com", "pw"),
+        account_a=Account(label="A", email="a@example.com", password="pw"),
+        account_b=Account(label="B", email="b@example.com", password="pw"),
     )
 
 
@@ -832,7 +832,7 @@ import json
 import pytest
 
 import tainted
-from tainted.dynamic.target import ProveSetup, Target
+from tainted.dynamic.target import Account, ProveSetup, Target
 from tainted.execution.base import SandboxUnavailable
 from tainted.execution.docker import DockerExecutor
 from tainted.selfdefense import PlanViolation
@@ -854,8 +854,8 @@ class FakeRunner:
 def _setup():
     return ProveSetup(
         target=Target(url="http://localhost:3000"),
-        login_a=("a@example.com", "pw"),
-        login_b=("b@example.com", "pw"),
+        account_a=Account(label="A", email="a@example.com", password="pw"),
+        account_b=Account(label="B", email="b@example.com", password="pw"),
     )
 
 
