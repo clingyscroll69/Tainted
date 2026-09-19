@@ -55,14 +55,24 @@ class SubprocessRunner:
             argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             env={**os.environ, **env},
         )
         assert proc.stdin and proc.stdout
-        proc.stdin.write(stdin)
-        proc.stdin.close()
+        try:
+            proc.stdin.write(stdin)
+            proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            # The child may have already exited (e.g. an invalid image). Fall through to
+            # draining stdout and checking the return code, so the real cause — surfaced via
+            # the non-zero exit below — reaches the caller instead of this pipe error masking it.
+            pass
         yield from proc.stdout
+        stderr = proc.stderr.read() if proc.stderr else ""
         proc.wait()
+        if proc.returncode:
+            raise subprocess.CalledProcessError(proc.returncode, argv, output=None, stderr=stderr)
 
 
 class DockerExecutor:
@@ -92,8 +102,8 @@ class DockerExecutor:
 
         return LocalExecutor().analyze(repo_path, only=only, skip=skip)
 
-    def _argv(self, repo_path: str) -> list[str]:
-        return [
+    def _argv(self, repo_path: str, has_key: bool) -> list[str]:
+        argv = [
             "docker", "run", "--rm", "-i",
             f"--network={self.network}",
             "-v", f"{repo_path}:/repo:ro",
@@ -101,9 +111,18 @@ class DockerExecutor:
             "--cap-drop", "ALL",
             "--security-opt", "no-new-privileges",
             "--user", "10001",
-            "-e", RUN_KEY_ENV,
-            self.image,
         ]
+        if has_key:
+            # Bare `-e NAME` forwards NAME from this process's own environment. Appending it
+            # only when a key was actually minted keeps an unguarded run (no plan, no key) from
+            # picking up a stray TAINTED_RUN_KEY left set on the host — the same partial-guard
+            # state correction 2 exists to keep out, reintroduced through the environment
+            # instead of through code. Inline `-e NAME=value` is deliberately avoided: that
+            # would put the key in this process's own argv, visible to `ps`, which is the whole
+            # reason it travels as an env var rather than in the request body.
+            argv += ["-e", RUN_KEY_ENV]
+        argv.append(self.image)
+        return argv
 
     def prove(
         self,
@@ -131,7 +150,7 @@ class DockerExecutor:
             plan=_plan_json(plan),
             plan_signature=plan_signature,
         )
-        argv = self._argv(repo_path)
+        argv = self._argv(repo_path, has_key=key is not None)
         env = {RUN_KEY_ENV: key.hex()} if key is not None else {}
         try:
             lines = self._runner.run(argv, req.model_dump_json(), env)

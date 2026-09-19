@@ -1,11 +1,14 @@
 import json
+import subprocess
+import sys
 
 import pytest
 
 import tainted
 from tainted.dynamic.target import Account, ProveSetup, Target
 from tainted.execution.base import SandboxUnavailable
-from tainted.execution.docker import DockerExecutor
+from tainted.execution.container_main import RUN_KEY_ENV
+from tainted.execution.docker import DockerExecutor, SubprocessRunner
 from tainted.selfdefense import PlanViolation
 
 
@@ -128,3 +131,57 @@ def test_a_run_that_ends_with_no_terminal_event_is_an_error():
     r = FakeRunner(['{"kind":"finding","finding":{"id":"f1"}}'])
     with pytest.raises(SandboxUnavailable, match="ended without"):
         DockerExecutor(runner=r).prove("/repo", _setup(), ownership_verified=True)
+
+
+def test_no_plan_means_no_stray_run_key_forwarded_into_the_container():
+    """Finding 1. Bare `-e NAME` forwards NAME from the host's own environment, so an
+    unguarded run must not append it at all — otherwise a stale host-side TAINTED_RUN_KEY
+    would cross in as a real key while `plan` is None, recreating the partial-guard state
+    correction 2 exists to prevent, this time through the environment rather than code."""
+    r = FakeRunner([_report_line()])
+    DockerExecutor(runner=r).prove("/repo", _setup(), ownership_verified=True)
+    assert RUN_KEY_ENV not in r.argv
+
+
+def test_a_plan_means_the_run_key_flag_is_present():
+    """The counterpart to the above: a guarded run does append the flag."""
+    from tainted.selfdefense import ProbePlan
+
+    r = FakeRunner([_report_line()])
+    plan = ProbePlan(target_url="http://localhost:3000", allowed=[])
+    DockerExecutor(runner=r).prove(
+        "/repo", _setup(), ownership_verified=True, plan=plan, plan_signature="sig",
+    )
+    assert RUN_KEY_ENV in r.argv
+
+
+# --- Real-subprocess tests for SubprocessRunner. No Docker daemon involved: argv points at
+# the Python interpreter instead of at `docker`, but the process is a genuine child process,
+# so these exercise the real pipe/return-code handling that FakeRunner-based tests cannot. ---
+
+def test_subprocess_runner_raises_on_nonzero_exit_with_stderr_reachable():
+    """Finding 2. Popen never raises CalledProcessError on its own; SubprocessRunner must
+    check the return code itself so the caller's actionable message (missing image, daemon
+    down, etc.) is reachable instead of being swallowed as a generic empty-report error."""
+    argv = [sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"]
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        list(SubprocessRunner().run(argv, "", {}))
+    assert exc_info.value.returncode == 3
+    assert "boom" in exc_info.value.stderr
+
+
+def test_subprocess_runner_survives_a_child_that_never_reads_stdin():
+    """Finding 3. A child that exits immediately without reading stdin must not let a
+    BrokenPipeError escape from the write; the non-zero exit should surface instead."""
+    argv = [sys.executable, "-c", "import sys; sys.exit(1)"]
+    with pytest.raises(subprocess.CalledProcessError) as exc_info:
+        list(SubprocessRunner().run(argv, "some stdin that is never read", {}))
+    assert exc_info.value.returncode == 1
+
+
+def test_subprocess_runner_yields_lines_and_raises_nothing_on_clean_exit():
+    """A well-behaved child that echoes NDJSON and exits 0 must simply yield those lines."""
+    line = _report_line()
+    argv = [sys.executable, "-c", f"print({line!r})"]
+    lines = list(SubprocessRunner().run(argv, "", {}))
+    assert any(json.loads(l.strip())["kind"] == "report" for l in lines if l.strip())
