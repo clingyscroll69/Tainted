@@ -69,13 +69,19 @@ pip install -e surfaces/website       # this surface
 ```
 
 `tainted-web` defaults **`TAINTED_REQUIRE_SANDBOX=1`** whichever way it is started, so a real
-`prove` is refused unless the host has Docker: `DockerExecutor` builds and runs the sandbox
-image `ghcr.io/OWNER/tainted-sandbox:X.Y.Z`, pinned to `tainted.__version__` (never `:latest`),
-one container per `prove` run. The bundled demo contacts nothing and is exempt, so the whole
-loop still demonstrates without Docker. To accept in-process execution on your own metal, set
-`TAINTED_REQUIRE_SANDBOX=0` and say so out loud. That default lives in
-`backend/run.py`'s `apply_deployment_defaults()` rather than in any image, so it holds however
-the server is started.
+`prove` is refused unless the host has Docker: `DockerExecutor` runs one container per `prove`
+from the sandbox image `ghcr.io/OWNER/tainted-sandbox:X.Y.Z`, pinned to `tainted.__version__`
+(never `:latest`). It does not build or pull that image itself — `docker run` fails if the
+image is not already present, so pull it onto the host before the first `prove`:
+
+```bash
+docker pull ghcr.io/OWNER/tainted-sandbox:X.Y.Z
+```
+
+The bundled demo contacts nothing and is exempt, so the whole loop still demonstrates without
+Docker. To accept in-process execution on your own metal, set `TAINTED_REQUIRE_SANDBOX=0` and
+say so out loud. That default lives in `backend/run.py`'s `apply_deployment_defaults()` rather
+than in any image, so it holds however the server is started.
 
 It defaults **`TAINTED_CSP_ENFORCE=1`** the same way and for the same reason, so the CSP blocks
 rather than only reporting. The policy already allows `unsafe-inline` for the inline script and

@@ -218,7 +218,9 @@ Four things about that command are the difference between a demo and a deploymen
   an image, so it holds however the server is started. Each `prove` run spawns one
   `ghcr.io/OWNER/tainted-sandbox:X.Y.Z` container, as a sibling of the server process — never a
   child, because that would need the root-equivalent Docker socket inside the very process that
-  runs strangers' exploits.
+  runs strangers' exploits. `DockerExecutor` only runs that image; it does not build or pull it,
+  so pull it onto the host before the first `prove`:
+  `docker pull ghcr.io/OWNER/tainted-sandbox:X.Y.Z`.
 * **`FORWARDED_ALLOW_IPS`** must name your proxy (or `*` only when nothing else can reach the
   port), or uvicorn ignores `X-Forwarded-*` and the app builds http URLs behind your https.
 
