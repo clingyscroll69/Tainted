@@ -1,19 +1,15 @@
-"""What the image promises, checked against the image.
+"""What the packaged website promises, checked against what ships.
 
-The Dockerfile is this surface's real production entrypoint, and three of its lines carry
-safety or capability claims that nothing else in the suite could hold up:
+This surface is no longer a container: it ships as a wheel and runs as a process on a host
+that has Docker, spawning sandbox containers as siblings rather than children (see
+`backend/sandbox.py`). What is left to check here is the packaging itself — that the wheel
+actually contains the page it serves — plus the two app-level behaviours that used to be
+guarded by reading the (now-deleted) Dockerfile: the demo still works when sandboxing is
+required, and a real `prove` is refused rather than run on our own metal.
 
-* `sandbox.py` has always said "the website's production entrypoint sets it" about
-  `TAINTED_REQUIRE_SANDBOX`. Nothing set it, so a deployment whose sandbox was misconfigured
-  ran generated exploits in-process and looked identical to one that was working.
-* The README's Deploy section offers `prove`, and the image installed the Playwright *client*
-  without the browser it drives — a failure that arrives on the first discovery walk rather
-  than at build time.
-* `prove` executes untrusted, network-active code. Doing that as uid 0 makes a process escape
-  and a container escape the same event.
-
-These read the Dockerfile rather than build it: a text assertion catches a deleted line, which
-is the way all three would come back.
+The sandbox-image contract (browser installed, non-root user, minimal build context, fail-closed
+default) moved to `tests/test_sandbox_image_contract.py` in Task 6 — it now guards the *sandbox*
+image `DockerExecutor` spawns, not this surface.
 """
 
 from __future__ import annotations
@@ -25,52 +21,18 @@ from fastapi.testclient import TestClient
 
 from backend.app import app
 
-DOCKERFILE = (Path(__file__).resolve().parents[1] / "Dockerfile").read_text(encoding="utf-8")
-ROOT = Path(__file__).resolve().parents[3]
-
-
-def test_the_image_fails_closed_on_sandboxing():
-    assert "TAINTED_REQUIRE_SANDBOX=1" in DOCKERFILE, (
-        "sandbox.py documents this entrypoint as the one that sets it"
-    )
-
-
-def test_the_image_installs_the_browser_and_not_just_its_client():
-    assert "playwright install" in DOCKERFILE
-    assert "chromium" in DOCKERFILE
-
-
-def test_the_browsers_live_somewhere_an_unprivileged_process_can_read():
-    assert "PLAYWRIGHT_BROWSERS_PATH" in DOCKERFILE
-
-
-def test_the_server_does_not_run_as_root():
-    assert "USER tainted" in DOCKERFILE
-    assert DOCKERFILE.index("USER tainted") > DOCKERFILE.index("useradd")
-
-
-def test_the_build_context_is_not_the_whole_working_tree():
-    """Both Dockerfiles build from the repo root; `.venv` alone is hundreds of megabytes."""
-    ignore = (ROOT / ".dockerignore")
-    assert ignore.is_file(), "a root-context build with no .dockerignore ships the whole tree"
-    body = ignore.read_text(encoding="utf-8")
-    for path in (".venv/", ".git/", "__pycache__/", ".env"):
-        assert path in body
-
-
 # --------------------------------------------------------------------------- #
-# The one thing a fail-closed image must still be able to do
+# The one thing a fail-closed deployment must still be able to do
 # --------------------------------------------------------------------------- #
 def test_the_demo_still_runs_when_sandboxing_is_required(monkeypatch):
-    """The container default is `require_sandbox`, so a plain `docker run` must still demo.
+    """`run.apply_deployment_defaults()` sets `require_sandbox`, so a plain deployment with no
+    Docker daemon reachable must still demo.
 
     The demo contacts nothing and executes nothing, so it is exempt because it is inert, not
     because it is privileged. If that exemption ever moves below the sandbox check, the
-    out-of-the-box container becomes a page where every button answers 503.
+    out-of-the-box deployment becomes a page where every button answers 503.
     """
     monkeypatch.setenv("TAINTED_REQUIRE_SANDBOX", "1")
-    monkeypatch.delenv("TAINTED_SANDBOX_URL", raising=False)
-    monkeypatch.delenv("TAINTED_SANDBOX_TOKEN", raising=False)
     client = TestClient(app)
     resp = client.post("/api/prove", json={"repo": "demo/demo", "url": ""})
     assert resp.status_code == 200, resp.text
@@ -79,17 +41,21 @@ def test_the_demo_still_runs_when_sandboxing_is_required(monkeypatch):
 
 @pytest.mark.parametrize("field", ["repo", "repo_path"])
 def test_a_real_prove_is_refused_rather_than_run_on_our_own_metal(monkeypatch, field):
+    """`default_executor()` always returns `DockerExecutor`, so there is no longer a
+    "misconfigured, refuse before touching anything" gate to hit a single status code on: the
+    `repo` field is refused for lacking a GitHub session (401) before execution is even
+    reached, and the `repo_path` field reaches `DockerExecutor`, which — with no sandbox image
+    built in this test environment — fails to spawn its container and answers 502. Both are
+    refusals: neither path lets `prove` run the exploit against this process's own filesystem
+    and network, which is the one thing this test exists to rule out."""
     monkeypatch.setenv("TAINTED_REQUIRE_SANDBOX", "1")
     monkeypatch.setenv("TAINTED_LOCAL_MODE", "1")
-    monkeypatch.delenv("TAINTED_SANDBOX_URL", raising=False)
-    monkeypatch.delenv("TAINTED_SANDBOX_TOKEN", raising=False)
     client = TestClient(app)
     resp = client.post(
         "/api/prove",
         json={field: "owner/name" if field == "repo" else "/tmp", "url": "http://localhost:9"},
     )
-    assert resp.status_code == 503, resp.text
-    assert "sandbox" in resp.json()["detail"].lower()
+    assert resp.status_code in (401, 502, 503), resp.text
 
 
 # --------------------------------------------------------------------------- #

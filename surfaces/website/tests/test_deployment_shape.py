@@ -116,11 +116,13 @@ def test_the_arm_note_does_not_name_a_target_at_rest():
 # Saying it once, to the operator
 # --------------------------------------------------------------------------- #
 def test_a_misconfigured_hosted_deployment_names_every_gap(hosted_no_oauth):
+    """No sandbox assertion here any more: `default_executor()` always returns `DockerExecutor`,
+    which is always `sandboxed`, so there is no longer a startup-visible way to misconfigure
+    where `prove` runs. What remains checkable at startup is auth and CSP."""
     joined = " ".join(deployment_warnings())
     assert "TAINTED_TOKEN_SECRET" in joined
     assert "GITHUB_CLIENT_ID" in joined
     assert "TAINTED_CSP_ENFORCE" in joined
-    assert "sandbox" in joined.lower()
 
 
 def test_a_developer_machine_is_not_nagged(local_dev):

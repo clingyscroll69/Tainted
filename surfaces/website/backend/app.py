@@ -422,10 +422,11 @@ def api_analyze(req: AnalyzeRequest, request: Request):
 # same Report; only the delivery differs.
 #
 # The first event is always `open`, and it says whether progress is coming at all. That is not a
-# nicety: an executor that cannot observe its own run (the sandboxed one — see
-# `sandbox.CloudflareExecutor`) is silent for the same reason a slow one is, and a progress
-# indicator unable to tell those apart will invent motion to cover the difference. Being told
-# "no events are coming" is what lets a surface say plainly that nothing is known yet.
+# nicety: an executor that cannot observe its own run is silent for the same reason a slow one
+# is, and a progress indicator unable to tell those apart will invent motion to cover the
+# difference. Being told "no events are coming" is what lets a surface say plainly that nothing
+# is known yet. (This deployment's `DockerExecutor` can observe its own run, so this only bites
+# a future executor that cannot.)
 # --------------------------------------------------------------------------- #
 NDJSON = "application/x-ndjson"
 
@@ -653,8 +654,8 @@ def api_prove(req: ProveRequest, request: Request):
         if require_sandbox() and not getattr(_executor, "sandboxed", False):
             raise HTTPException(
                 503,
-                "This deployment requires sandboxed execution for `prove`, and no sandbox is "
-                "configured (set TAINTED_SANDBOX_URL and TAINTED_SANDBOX_TOKEN).",
+                "This deployment requires sandboxed execution for `prove`, and Docker is not "
+                "available to provide it.",
             )
 
         if stream:
@@ -832,16 +833,14 @@ def deployment_warnings() -> list[str]:
             "will fail with an opaque error. Set it to "
             "https://<your-host>/api/auth/github/callback."
         )
-    if require_sandbox() and not getattr(_executor, "sandboxed", False):
-        out.append(
-            "TAINTED_REQUIRE_SANDBOX is set but no sandbox is configured "
-            "(TAINTED_SANDBOX_URL / TAINTED_SANDBOX_TOKEN). Every `prove` will be refused."
-        )
-    elif not require_sandbox() and not getattr(_executor, "sandboxed", False):
-        out.append(
-            "`prove` will execute untrusted exploits in this process: no sandbox is "
-            "configured and TAINTED_REQUIRE_SANDBOX is not set. Set it to fail closed."
-        )
+    # There used to be a warning here for "the sandbox is misconfigured" — reachable when the
+    # executor was chosen by an environment variable that could be set wrong or left unset.
+    # `default_executor()` no longer has that failure mode: it always returns `DockerExecutor`,
+    # so `_executor.sandboxed` is always True and there is nothing left to misconfigure at
+    # startup. What can still go wrong — no Docker daemon reachable on the host — only shows up
+    # when a `prove` request actually tries to spawn a container, and `api_prove` already turns
+    # that into a legible 502/503 rather than a silent in-process run. A working Docker daemon
+    # is simply a deployment requirement now, not something this function can check for free.
     if not _env_flag("TAINTED_CSP_ENFORCE"):
         out.append(
             "TAINTED_CSP_ENFORCE is not set, so the Content-Security-Policy is sent "

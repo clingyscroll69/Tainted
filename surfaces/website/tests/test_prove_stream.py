@@ -10,13 +10,13 @@ from __future__ import annotations
 
 import json
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from backend import app as app_module
 from backend import demo as demo_mode
-from backend.sandbox import CloudflareExecutor, LocalExecutor
+from backend.sandbox import LocalExecutor, ProveOutcome
+from tainted.execution.docker import DockerExecutor
 
 client = TestClient(app_module.app)
 NDJSON = {"Accept": "application/x-ndjson"}
@@ -117,28 +117,33 @@ def test_every_streamed_finding_appears_in_the_final_report():
 
 
 # --------------------------------------------------------------------------- #
-# An executor that cannot watch its own run must say so
+# The website's sandboxed executor can finally watch its own run
 # --------------------------------------------------------------------------- #
-def test_the_local_executor_streams_and_the_sandboxed_one_does_not():
+def test_the_local_executor_and_the_docker_one_both_stream():
+    """The retired Cloudflare-worker executor ran the whole engine behind one request/response
+    and could not report anything before it landed, so `streams` was False and the UI had to
+    degrade to 'nothing is known'. `DockerExecutor` runs the same in-process engine inside the
+    container and forwards the same candidate/finding hooks across the process boundary, so it
+    can finally report progress like `LocalExecutor` always could."""
     assert LocalExecutor.streams is True
-    assert CloudflareExecutor.streams is False
+    assert DockerExecutor.streams is True
 
 
-def test_a_sandboxed_deployment_reports_no_progress_rather_than_inventing_it(monkeypatch):
-    """The worker runs the whole engine behind one request and hands back a finished Report, so
-    there is nothing honest to emit before it lands. The `open` event has to admit that: silence
-    from a slow run and silence from an unobservable one look identical, and a progress indicator
-    that cannot tell them apart will animate toward a finish line nobody measured."""
+def test_a_non_streaming_executor_still_reports_no_progress_rather_than_inventing_it(monkeypatch):
+    """Nothing on this deployment is non-streaming any more, but the honesty contract in
+    `api_prove` — the `open` event says plainly whether progress is coming — has to keep holding
+    for any executor that cannot observe its own run, streaming or not. A stub stands in for
+    such an executor; there is no real one on this surface left to use."""
     report = LocalExecutor().analyze(str(app_module.FRONTEND.parent))
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json=report.model_dump(mode="json"))
+    class NonStreamingStub:
+        sandboxed = True
+        streams = False
 
-    executor = CloudflareExecutor(
-        "https://sandbox.example", "tok",
-        client=httpx.Client(transport=httpx.MockTransport(handler)),
-    )
-    monkeypatch.setattr(app_module, "_executor", executor)
+        def prove(self, repo_path, setup, ownership_verified, **hooks):
+            return ProveOutcome(report=report)
+
+    monkeypatch.setattr(app_module, "_executor", NonStreamingStub())
 
     r = client.post(
         "/api/prove",

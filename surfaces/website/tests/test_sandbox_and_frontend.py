@@ -5,91 +5,46 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import httpx
-import pytest
 from fastapi.testclient import TestClient
 
 from backend import app as app_module
-from backend.sandbox import (
-    CloudflareExecutor,
-    LocalExecutor,
-    SandboxUnavailable,
-    default_executor,
-)
-from tainted.dynamic.target import Account, ProveSetup, Target
+from backend.sandbox import LocalExecutor, default_executor
+from tainted.execution.docker import DockerExecutor
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend" / "index.html"
 FIXTURES = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 
 
-def _setup() -> ProveSetup:
-    return ProveSetup(
-        target=Target(url="http://localhost:3000"),
-        account_a=Account(label="A", email="a@x", password="p"),
-        account_b=Account(label="B", email="b@x", password="p"),
-    )
-
-
 # --------------------------------------------------------------------------- #
 # The execution boundary
 # --------------------------------------------------------------------------- #
-def test_executor_is_local_unless_the_sandbox_is_configured(monkeypatch):
-    monkeypatch.delenv("TAINTED_SANDBOX_URL", raising=False)
-    monkeypatch.delenv("TAINTED_SANDBOX_TOKEN", raising=False)
-    assert isinstance(default_executor(), LocalExecutor)
-
-    monkeypatch.setenv("TAINTED_SANDBOX_URL", "https://sandbox.example")
-    monkeypatch.setenv("TAINTED_SANDBOX_TOKEN", "t")
-    assert isinstance(default_executor(), CloudflareExecutor)
-
-
-def test_local_executor_is_not_marked_sandboxed():
-    """The flag the API gate reads must not lie about where exploits run."""
-    assert LocalExecutor.sandboxed is False
-    assert CloudflareExecutor.sandboxed is True
+def test_the_website_executor_is_the_docker_one_in_bridge_mode():
+    """The website's targets are always remote, so the container gets no host networking and
+    stays fully network-isolated from the machine running it."""
+    ex = default_executor()
+    assert isinstance(ex, DockerExecutor)
+    assert ex.network == "bridge"
+    assert ex.sandboxed is True
 
 
-def test_cloudflare_executor_marshals_a_report_back():
-    captured = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured["url"] = str(request.url)
-        captured["auth"] = request.headers.get("authorization")
-        return httpx.Response(
-            200,
-            json={
-                "repo_path": "/repo",
-                "summary": {"total_candidates": 1, "proven": 1},
-                "findings": [],
-                "unproven_candidates": [],
-                "applicability": [],
-                "coverage": [],
-            },
-        )
-
-    executor = CloudflareExecutor(
-        "https://sandbox.example", "tok",
-        client=httpx.Client(transport=httpx.MockTransport(handler)),
-    )
-    outcome = executor.prove("/repo", _setup(), ownership_verified=True)
-
-    assert outcome.report.summary.proven == 1
-    assert captured["url"] == "https://sandbox.example/prove"
-    assert captured["auth"] == "Bearer tok"
+def test_the_website_can_finally_report_progress():
+    """The retired Cloudflare-worker executor had streams=False, so the UI had to degrade to
+    'nothing is known'."""
+    assert default_executor().streams is True
 
 
-def test_unreachable_sandbox_raises_rather_than_running_locally():
-    """Falling back to local execution here would run exploits on our own metal, silently."""
+def test_there_is_no_worker_backed_executor_left_to_configure():
+    """A configured path that requires a paid plan is a live-looking option nobody can take."""
+    import backend.sandbox as s
 
-    def handler(request):
-        raise httpx.ConnectError("refused")
+    assert not any("cloudflare" in name.lower() for name in dir(s))
 
-    executor = CloudflareExecutor(
-        "https://sandbox.example", "tok",
-        client=httpx.Client(transport=httpx.MockTransport(handler)),
-    )
-    with pytest.raises(SandboxUnavailable):
-        executor.prove("/repo", _setup(), ownership_verified=True)
+
+def test_the_website_ships_no_dockerfile_of_its_own():
+    """A containerised website cannot safely spawn sandbox containers: it would need the
+    root-equivalent Docker socket, handed to the process that runs strangers' exploits. That is
+    strictly worse than the in-process run it would replace."""
+    assert not (Path(__file__).resolve().parents[1] / "Dockerfile").exists()
 
 
 def test_prove_is_refused_when_a_sandbox_is_required_but_absent(monkeypatch):
