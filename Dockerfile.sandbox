@@ -1,0 +1,37 @@
+# The prove sandbox. One container per run, started by `tainted.execution.docker`.
+# Build context is the REPO ROOT:
+#   docker build -f Dockerfile.sandbox -t tainted-sandbox .
+#
+# One image serves all three surfaces. It replaces `tainted-web` in the release matrix rather
+# than adding to it — the website ships as a wheel now, because a containerised website cannot
+# safely spawn sandbox containers (it would need the root-equivalent Docker socket, handed to
+# the exact process that runs strangers' generated exploits).
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Playwright's browsers go somewhere every uid can read, because they are installed as root and
+# the run does not happen as root. Left at the default (~/.cache/ms-playwright) they land in
+# root's home and the unprivileged process cannot see them — which fails at the first
+# autodiscovery walk, not at build time.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONUNBUFFERED=1
+
+COPY pyproject.toml README.md /app/
+COPY tainted /app/tainted
+
+# The engine with the dynamic extra: this image exists to run `prove`.
+RUN pip install --no-cache-dir -e ".[dynamic]"
+
+# The Python package is not the browser. `pip install playwright` installs a client for a
+# Chromium that is not there yet. `--with-deps` pulls the shared libraries Chromium needs on slim.
+RUN playwright install --with-deps chromium \
+ && chmod -R a+rX /ms-playwright \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 10001 tainted
+USER tainted
+
+# The repo is mounted read-only at /repo by the host. Nothing is written anywhere but /tmp.
+ENTRYPOINT ["python", "-m", "tainted.execution.container_main"]
