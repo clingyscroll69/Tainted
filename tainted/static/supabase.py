@@ -18,7 +18,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
 
 import logging
 
@@ -29,6 +29,7 @@ from sqlglot import exp
 # falls back to sqlglot's raw `Command` — expected, and handled by regex. Silence the noise.
 logging.getLogger("sqlglot").setLevel(logging.ERROR)
 
+from tainted.static.exclude import is_excluded
 from tainted.static.parsing import find_supabase_table_ops, language_for_path
 
 
@@ -226,7 +227,7 @@ _CLIENT_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 _SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv"}
 
 
-def build_model(repo_path: str) -> SupabaseModel:
+def build_model(repo_path: str, exclude: Sequence[str] = ()) -> SupabaseModel:
     """Scan a repository and build its Supabase ownership model."""
     root = Path(repo_path)
     model = SupabaseModel()
@@ -237,6 +238,8 @@ def build_model(repo_path: str) -> SupabaseModel:
             if sql_path in seen or not sql_path.is_file():
                 continue
             if any(part in _SKIP_DIRS for part in sql_path.parts):
+                continue
+            if exclude and is_excluded(str(sql_path.relative_to(root)), exclude):
                 continue
             seen.add(sql_path)
             try:
@@ -249,6 +252,8 @@ def build_model(repo_path: str) -> SupabaseModel:
         if not client_path.is_file() or client_path.suffix not in _CLIENT_EXTS:
             continue
         if any(part in _SKIP_DIRS for part in client_path.parts):
+            continue
+        if exclude and is_excluded(str(client_path.relative_to(root)), exclude):
             continue
         try:
             text = client_path.read_text(encoding="utf-8", errors="replace")

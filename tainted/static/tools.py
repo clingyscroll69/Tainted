@@ -12,7 +12,9 @@ import ast
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence
+
+from tainted.static.exclude import is_excluded
 
 _SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv"}
 
@@ -368,7 +370,7 @@ def _object_fields(args_node, src: bytes) -> dict[str, str]:
 _JS_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs")
 
 
-def discover_scopes(repo_path: str) -> list[AgentScope]:
+def discover_scopes(repo_path: str, exclude: Sequence[str] = ()) -> list[AgentScope]:
     """Find every agent scope in a repository across the supported formats.
 
     Configured formats (MCP, n8n, Flowise) parse to provable scopes — the manifest *is* the
@@ -382,6 +384,8 @@ def discover_scopes(repo_path: str) -> list[AgentScope]:
         if not path.is_file() or any(part in _SKIP_DIRS for part in path.parts):
             continue
         rel = str(path.relative_to(root))
+        if exclude and is_excluded(rel, exclude):
+            continue
 
         if path.suffix == ".json":
             try:

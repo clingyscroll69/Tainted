@@ -15,7 +15,7 @@ Three candidate sources feed one queue:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from tainted.checks.bola import analyze_bola
 from tainted.llm.client import LLMClient, LLMUnavailable
@@ -219,6 +219,7 @@ def analyze_request_plane(
     repo_path: str,
     llm: Optional[LLMClient] = None,
     checks: Optional[set[Check]] = None,
+    exclude: Sequence[str] = (),
 ) -> list[Candidate]:
     """Full request-plane static pass: RLS audit + BOLA route analysis + taint, then rank.
 
@@ -232,15 +233,15 @@ def analyze_request_plane(
     candidates: list[Candidate] = []
 
     if Check.RLS in checks:
-        candidates.extend(audit_rls(build_model(repo_path)))
+        candidates.extend(audit_rls(build_model(repo_path, exclude)))
 
     if Check.BOLA in checks:
-        route_candidates = analyze_bola(repo_path, llm=llm)
+        route_candidates = analyze_bola(repo_path, llm=llm, exclude=exclude)
         candidates.extend(route_candidates)
         # Semgrep taint traces a parameter into a query across calls; the single-handler scan
         # above cannot. Merged rather than replaced, and deduplicated by location.
         candidates.extend(
-            _new_locations(semgrep_bola_candidates(repo_path), candidates)
+            _new_locations(semgrep_bola_candidates(repo_path, exclude=exclude), candidates)
         )
 
     if llm is not None:

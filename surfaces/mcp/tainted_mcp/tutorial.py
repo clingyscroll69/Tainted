@@ -24,6 +24,12 @@ LESSONS: list[dict] = [
                 "body": "Pass only to run a specific check (e.g., only='bola'). Pass skip to exclude checks (e.g., skip='test_integrity'). Both take comma-separated check names.",
                 "expect": "The report runs only the checks you asked for. If you pass both only and skip, only is honored.",
             },
+            {
+                "heading": "Exclude demo and fixture folders you choose",
+                "body": "Some folders hold deliberately-vulnerable sample code — security-tool fixtures, demo apps, teaching examples, a repository's own test corpus. Their holes are specimens, not live risk, and reporting them back is a false positive. Look at the repo layout and decide which paths are specimen code, then pass them to `exclude` (comma-separated). A bare name like `fixtures` excludes any folder by that name anywhere; a glob like `tests/*` or `**/demo.py` is matched against each path. This is your judgment call from the layout — Tainted applies no defaults and excludes nothing unless you name it.",
+                "call": "tainted_analyze(repo_path=\"/path\", exclude=\"tests/fixtures, **/demo.py, examples\")",
+                "expect": "The same report with those paths left unscanned; when you pass exclude, the report echoes it back as `excluded` so you can say what you skipped. Prefer naming specimen folders to hand-dismissing each finding afterward.",
+            },
         ],
         "next": "Read indexes to understand how to address one candidate out of many in fix.",
     },
@@ -68,10 +74,15 @@ LESSONS: list[dict] = [
                 "expect": "No immediate result — only a job_id to track.",
             },
             {
+                "heading": "Get the credentials from the developer — never invent them",
+                "body": "The cross-account attacks need two real accounts on the target. Those credentials are the developer's to give, not yours to guess or to scrape out of the code, seed files, or .env. Before the first prove of a session, ask the developer for permission to run live exploits AND for the two logins (and a seed record id, if they have one). Pass back exactly what they give you. If you call tainted_prove_start without login_a/login_b, it does not error — it returns action_required='ask_user' with the message to relay. Empty or fabricated credentials are not a shortcut: they turn a real test into a run against nothing that only looks clean.",
+                "expect": "You hold two 'email:password' strings the developer gave you, and their go-ahead to attack the target. If the app has no accounts at all, say so and report the account-based checks (BOLA, RLS) as unproven rather than running them empty.",
+            },
+            {
                 "heading": "Start a prove job",
-                "body": "Call tainted_prove_start with repo_path, url (the running app), login credentials for two accounts, and optional seed data. login_a and login_b are 'email:password' strings.",
+                "body": "Call tainted_prove_start with repo_path, url (the running app), the two logins the developer gave you, and optional seed data. login_a and login_b are 'email:password' strings.",
                 "call": "tainted_prove_start(repo_path=\"/path\", url=\"http://localhost:3000\", login_a=\"alice@example.com:password1\", login_b=\"bob@example.com:password2\")",
-                "expect": "A dict with job_id, status='running', and committed_plan (the bounded set of HTTP calls prove will make). The signature is truncated for display.",
+                "expect": "A dict with job_id, status='running', and committed_plan (the bounded set of HTTP calls prove will make). The signature is truncated for display. Called with a login missing, you get action_required='ask_user' and no job — go ask, do not fill it in yourself.",
             },
             {
                 "heading": "Poll the job status",

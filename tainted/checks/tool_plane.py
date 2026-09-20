@@ -8,7 +8,7 @@ by how dangerous the sink is, ready for dynamic proof.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 import networkx as nx
 
@@ -118,6 +118,7 @@ def analyze_tool_plane(
     repo_path: str,
     llm: Optional[LLMClient] = None,
     dropped: Optional[list[FilteredScope]] = None,
+    exclude: Sequence[str] = (),
 ) -> list[Candidate]:
     """Discover scopes, label their tools, find co-located ones, and rank the risky ones.
 
@@ -130,7 +131,7 @@ def analyze_tool_plane(
     working unchanged; the orchestrator passes one so the report can account for them.
     """
     dropped = [] if dropped is None else dropped
-    scopes = discover_scopes(repo_path)
+    scopes = discover_scopes(repo_path, exclude)
     if not scopes or llm is None:
         return []
 

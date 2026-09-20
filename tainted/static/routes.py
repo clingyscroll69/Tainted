@@ -25,8 +25,9 @@ import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Optional, Sequence
 
+from tainted.static.exclude import is_excluded
 from tainted.static.parsing import (
     first_string_argument,
     language_for_path,
@@ -552,12 +553,12 @@ def _is_next_pages_api(rel_path: str) -> bool:
 _JS_EXTS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 
 
-def discover_routes(repo_path: str) -> list[RouteHandler]:
+def discover_routes(repo_path: str, exclude: Sequence[str] = ()) -> list[RouteHandler]:
     """Every route the repository declares, across the supported frameworks."""
     root = Path(repo_path)
     routes: list[RouteHandler] = []
 
-    for path in _candidate_files(root):
+    for path in _candidate_files(root, exclude):
         rel = str(path.relative_to(root))
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -581,11 +582,13 @@ def discover_routes(repo_path: str) -> list[RouteHandler]:
     return routes
 
 
-def _candidate_files(root: Path) -> Iterable[Path]:
+def _candidate_files(root: Path, exclude: Sequence[str] = ()) -> Iterable[Path]:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
         if any(part in _SKIP_DIRS for part in path.parts):
+            continue
+        if exclude and is_excluded(str(path.relative_to(root)), exclude):
             continue
         if path.suffix == ".py" or path.suffix in _JS_EXTS:
             yield path

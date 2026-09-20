@@ -7,7 +7,7 @@ re-verifies by the loop its plane requires). Surfaces are thin adapters over the
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Sequence
 
 from tainted.applicability import BehavioralProbe, decide_plane
 from tainted.checks.classic_injection import scan_classic_injection
@@ -66,6 +66,7 @@ def analyze(
     target: Optional[Target] = None,
     behavioral_probe: Optional[BehavioralProbe] = None,
     mutation_runner: Optional[CommandRunner] = None,
+    exclude: Sequence[str] = (),
 ) -> AnalysisResult:
     """Static pass over a repository. Read-only, universal, produces ranked candidates.
 
@@ -75,6 +76,11 @@ def analyze(
     `target` enables the cascade's third rung: when the cheap rungs and the model are all
     inconclusive, and the owner's app is up, an unauthenticated request settles it. Passing no
     target simply stops the cascade one rung earlier — it never turns doubt into a skip.
+
+    `exclude` is the caller's list of demo/fixture/specimen paths to leave unscanned, on top of
+    the machine-generated trees every walker already skips. Deliberately-vulnerable sample code
+    is the motivating case: without it, pointing Tainted at a repo that ships intentional holes
+    (its own included) reports those specimens as if the running app were vulnerable.
     """
     candidates: list[Candidate] = []
     active = _active_checks(only, skip)
@@ -91,10 +97,12 @@ def analyze(
         request_checks = active & {Check.BOLA, Check.RLS}
         if request_checks:
             candidates.extend(
-                analyze_request_plane(repo_path, llm=llm, checks=request_checks)
+                analyze_request_plane(
+                    repo_path, llm=llm, checks=request_checks, exclude=exclude
+                )
             )
         if Check.CLASSIC_INJECTION in active:
-            candidates.extend(scan_classic_injection(repo_path))
+            candidates.extend(scan_classic_injection(repo_path, exclude))
 
     # Tool plane — same rule. Labeling/filtering needs the LLM; without it the pass is empty.
     tool_decision = decide_plane(
@@ -106,7 +114,9 @@ def analyze(
     filtered_scopes: list[FilteredScope] = []
     if tool_decision.applies and Check.AGENT_INJECTION in active:
         candidates.extend(
-            analyze_tool_plane(repo_path, llm=llm, dropped=filtered_scopes)
+            analyze_tool_plane(
+                repo_path, llm=llm, dropped=filtered_scopes, exclude=exclude
+            )
         )
 
     # Test integrity — a codebase-level measurement, not a plane, so no applicability gate.

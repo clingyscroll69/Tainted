@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 from tainted.models import (
     Candidate,
@@ -23,6 +24,7 @@ from tainted.models import (
     Severity,
     SourceLocation,
 )
+from tainted.static.exclude import is_excluded
 from tainted.static.routes import discover_routes
 from tainted.static.semgrep import semgrep_injection_candidates
 
@@ -125,7 +127,7 @@ def _demonstrated_exploit(kind: str, live_provable: bool) -> Exploit:
     )
 
 
-def scan_classic_injection(repo_path: str) -> list[Candidate]:
+def scan_classic_injection(repo_path: str, exclude: Sequence[str] = ()) -> list[Candidate]:
     """Scan for classic injection: a fast regex pass, then Semgrep confirms which hits are real.
 
     A regex hit alone can't tell a request value from a fixed string; Semgrep can. Each
@@ -140,11 +142,13 @@ def scan_classic_injection(repo_path: str) -> list[Candidate]:
             continue
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
+        rel = str(path.relative_to(root))
+        if exclude and is_excluded(rel, exclude):
+            continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        rel = str(path.relative_to(root))
         for i, line in enumerate(text.splitlines(), start=1):
             for sp in _PATTERNS:
                 if sp.pattern.search(line):
@@ -152,9 +156,9 @@ def scan_classic_injection(repo_path: str) -> list[Candidate]:
 
     # Semgrep's confirmed flows. Where one lands on a line the regex pass already found,
     # it upgrades that candidate instead of duplicating it: same bug, better evidence.
-    _merge_taint_confirmations(candidates, semgrep_injection_candidates(repo_path))
+    _merge_taint_confirmations(candidates, semgrep_injection_candidates(repo_path, exclude=exclude))
 
-    _attach_routes(candidates, repo_path)
+    _attach_routes(candidates, repo_path, exclude)
     # Sorted with raw-query and shell constructs first, Semgrep-confirmed first within each severity.
     candidates.sort(
         key=lambda c: (-c.severity.rank, not c.metadata.get("taint_confirmed", False))
@@ -182,12 +186,12 @@ def _merge_taint_confirmations(
         )
 
 
-def _attach_routes(candidates: list[Candidate], repo_path: str) -> None:
+def _attach_routes(candidates: list[Candidate], repo_path: str, exclude: Sequence[str] = ()) -> None:
     """Attach the route that reaches each possible hole, when one exists.
 
     Without a route, Tainted has no URL to send an attack to, so it can't prove anything.
     """
-    routes = discover_routes(repo_path)
+    routes = discover_routes(repo_path, exclude)
     by_file: dict[str, list] = {}
     for route in routes:
         by_file.setdefault(route.file, []).append(route)

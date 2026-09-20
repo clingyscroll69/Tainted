@@ -27,7 +27,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from tainted.models import (
     Candidate,
@@ -64,7 +64,7 @@ def semgrep_available() -> bool:
     return shutil.which("semgrep") is not None
 
 
-def _default_runner(rules: Path, repo_path: str) -> SemgrepRun:
+def _default_runner(rules: Path, repo_path: str, exclude: Sequence[str] = ()) -> SemgrepRun:
     if not semgrep_available():
         return SemgrepRun(
             available=False,
@@ -72,6 +72,9 @@ def _default_runner(rules: Path, repo_path: str) -> SemgrepRun:
             note="semgrep not installed — interprocedural taint skipped (pip install 'tainted[semgrep]').",
         )
     try:
+        exclude_args: list[str] = []
+        for pat in exclude:
+            exclude_args += ["--exclude", pat]
         proc = subprocess.run(
             [
                 "semgrep",
@@ -82,6 +85,7 @@ def _default_runner(rules: Path, repo_path: str) -> SemgrepRun:
                 "--no-git-ignore",
                 "--metrics",
                 "off",
+                *exclude_args,
                 repo_path,
             ],
             capture_output=True,
@@ -112,10 +116,10 @@ def parse_results(payload: str) -> list[dict[str, Any]]:
 # BOLA candidates
 # --------------------------------------------------------------------------- #
 def semgrep_bola_candidates(
-    repo_path: str, runner: Optional[SemgrepRunner] = None
+    repo_path: str, runner: Optional[SemgrepRunner] = None, exclude: Sequence[str] = ()
 ) -> list[Candidate]:
     """Taint flows from a request parameter to a database read, minus the ones already scoped."""
-    run = (runner or _default_runner)(BOLA_RULES, repo_path)
+    run = runner(BOLA_RULES, repo_path) if runner else _default_runner(BOLA_RULES, repo_path, exclude)
     if not run.available:
         return []
 
@@ -182,14 +186,14 @@ _SEVERITY = {"sql": Severity.HIGH, "command": Severity.CRITICAL, "template": Sev
 
 
 def semgrep_injection_candidates(
-    repo_path: str, runner: Optional[SemgrepRunner] = None
+    repo_path: str, runner: Optional[SemgrepRunner] = None, exclude: Sequence[str] = ()
 ) -> list[Candidate]:
     """Taint-confirmed injection flows — user input actually reaching a raw sink.
 
     These are strictly stronger than the regex pre-pass, which cannot tell an interpolated
     request value from an interpolated constant, so they carry a higher confidence.
     """
-    run = (runner or _default_runner)(INJECTION_RULES, repo_path)
+    run = runner(INJECTION_RULES, repo_path) if runner else _default_runner(INJECTION_RULES, repo_path, exclude)
     if not run.available:
         return []
 

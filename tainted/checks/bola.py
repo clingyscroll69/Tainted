@@ -11,7 +11,7 @@ proving one costs a single HTTP request and every one gets tried regardless of t
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, Sequence
 
 from tainted.llm.client import LLMClient, LLMUnavailable
 from tainted.models import (
@@ -142,9 +142,9 @@ def judge_bola_candidates(candidates: list[Candidate], llm: LLMClient) -> list[C
 # --------------------------------------------------------------------------- #
 # Static entry point
 # --------------------------------------------------------------------------- #
-def analyze_bola(repo_path: str, llm: Optional[LLMClient] = None) -> list[Candidate]:
+def analyze_bola(repo_path: str, llm: Optional[LLMClient] = None, exclude: Sequence[str] = ()) -> list[Candidate]:
     """Discover routes, keep the ones missing an ownership predicate, rank them."""
-    routes = discover_routes(repo_path)
+    routes = discover_routes(repo_path, exclude)
     candidates = bola_candidates(routes)
     if llm is not None and candidates:
         judge_bola_candidates(candidates, llm)
