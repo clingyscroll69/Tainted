@@ -112,3 +112,70 @@ def test_test_integrity_runs_and_reaches_the_report():
 def test_test_integrity_is_not_run_by_default():
     """A mutation campaign is minutes; it must be opt-in, and its absence must be visible."""
     assert analyze(ROUTES).mutation is None
+
+
+# --------------------------------------------------------------------------- #
+# An attack that ran and failed is not a proof
+#
+# `_coverage` asked only whether a finding for the check *existed*, and every prove outcome is
+# a finding — NOT_REPRODUCED included. So a run whose single attack fired and held came back
+# saying the check was proven, in the same report whose summary said `proven: 0`. That is the
+# one direction the coverage column exists to rule out.
+# --------------------------------------------------------------------------- #
+def test_a_not_reproduced_attack_does_not_mark_the_check_proven():
+    from tainted.models import Candidate, SourceLocation
+
+    result = analyze(ROUTES)
+    candidate = Candidate(
+        check=Check.CLASSIC_INJECTION,
+        title="Raw SQL query with a value pasted directly in",
+        location=SourceLocation(file="app.py", line=14),
+        metadata={"kind": "sql"},
+    )
+    result.candidates.append(candidate)
+    finding = Finding(candidate=candidate, status=FindingStatus.NOT_REPRODUCED)
+    report = build_report(result, [finding])
+
+    note = [n for n in report.coverage if n.check is Check.CLASSIC_INJECTION][0]
+    assert report.summary.proven == 0
+    assert note.proved is False, "an attack that ran and failed is not a proof"
+
+
+def test_a_proven_finding_still_marks_the_check_proven():
+    """The guard must not have blunted the real case."""
+    from tainted.models import Candidate, SourceLocation
+
+    result = analyze(ROUTES)
+    candidate = Candidate(
+        check=Check.CLASSIC_INJECTION,
+        title="Raw SQL query with a value pasted directly in",
+        location=SourceLocation(file="app.py", line=14),
+        metadata={"kind": "sql"},
+    )
+    result.candidates.append(candidate)
+    finding = Finding(candidate=candidate, status=FindingStatus.PROVEN)
+    report = build_report(result, [finding])
+
+    note = [n for n in report.coverage if n.check is Check.CLASSIC_INJECTION][0]
+    assert note.proved is True
+
+
+def test_a_not_reproduced_attack_says_it_was_attempted_and_held():
+    """Not-proven and not-attempted are different facts, and the note must not conflate them."""
+    from tainted.models import Candidate, SourceLocation
+
+    result = analyze(ROUTES)
+    candidate = Candidate(
+        check=Check.CLASSIC_INJECTION,
+        title="Raw SQL query with a value pasted directly in",
+        location=SourceLocation(file="app.py", line=14),
+        metadata={"kind": "sql"},
+    )
+    result.candidates.append(candidate)
+    report = build_report(
+        result, [Finding(candidate=candidate, status=FindingStatus.NOT_REPRODUCED)]
+    )
+
+    note = [n for n in report.coverage if n.check is Check.CLASSIC_INJECTION][0]
+    assert "Not attempted" not in note.detail
+    assert "did not succeed" in note.detail

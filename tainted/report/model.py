@@ -143,17 +143,41 @@ _COVERAGE_RULES: dict[Check, tuple[bool, str]] = {
 }
 
 
+# Statuses that mean an attack actually ran and the hole was real. FIXED and
+# BROKE_IT_SAFELY only arise in the fix loop, downstream of a hole that was already proven,
+# so both carry the proof forward. REPORTED is argued statically and NOT_REPRODUCED is the
+# attack holding — neither is a proof by running.
+_PROOF_ESTABLISHING = frozenset(
+    {FindingStatus.PROVEN, FindingStatus.FIXED, FindingStatus.BROKE_IT_SAFELY}
+)
+
+
 def _coverage(analysis: AnalysisResult, findings: list[Finding]) -> list[CoverageNote]:
     """One note per check present in this run, saying how far its proof actually reached."""
     notes: list[CoverageNote] = []
     present = {c.check for c in analysis.candidates}
     for check in sorted(present, key=lambda c: c.value):
         proved, detail = _COVERAGE_RULES.get(check, (False, ""))
-        # Candidates with no findings were only analyzed, not proven. Say so, rather than
-        # let an empty proof column look like a passed attack.
-        if proved and not any(f.check == check for f in findings):
-            detail = f"Not attempted in this run (static analysis only). {detail}"
-            proved = False
+        # Three outcomes, not two. Asking only whether a finding *exists* conflated the last
+        # two, because every prove outcome is a finding — NOT_REPRODUCED included. A run whose
+        # single attack fired and held then reported the check proven, in the same report whose
+        # summary said `proven: 0`.
+        if proved:
+            for_check = [f for f in findings if f.check == check]
+            if not for_check:
+                # Only analyzed. Say so, rather than let an empty proof column read as a
+                # passed attack.
+                detail = f"Not attempted in this run (static analysis only). {detail}"
+                proved = False
+            elif not any(f.status in _PROOF_ESTABLISHING for f in for_check):
+                # Attempted, and it held. That is a real result and a different one from
+                # never having tried — the note must not claim either the proof or the silence.
+                detail = (
+                    f"Attempted in this run: the attack ran and did not succeed. That is "
+                    f"evidence, not a guarantee — it rules out this exploit, not the hole. "
+                    f"{detail}"
+                )
+                proved = False
         notes.append(CoverageNote(check=check, proved=proved, detail=detail))
 
     # The model's one membership decision, said out loud. A scope it filtered out was never
