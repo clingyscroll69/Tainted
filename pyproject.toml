@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tainted"
-version = "0.1.1"
+version = "0.1.2"
 description = "A security scanner for AI-written apps: finds where untrusted data reaches a dangerous place, proves it by attacking, and fixes it."
 readme = "README.md"
 requires-python = ">=3.11"

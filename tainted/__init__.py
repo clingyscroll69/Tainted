@@ -22,7 +22,7 @@ from tainted.models import (
 
 from tainted.orchestrator import OwnershipError, analyze, fix, prove
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "analyze",
