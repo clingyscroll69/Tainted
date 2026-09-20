@@ -1,6 +1,5 @@
 import time
 
-import pytest
 
 from tainted_mcp.server import tainted_prove_start, tainted_prove_status
 

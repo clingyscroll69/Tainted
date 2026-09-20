@@ -1,7 +1,6 @@
 # tests/test_sandbox_image_contract.py
 from pathlib import Path
 
-import tainted
 
 DOCKERFILE = Path(__file__).resolve().parents[1] / "Dockerfile.sandbox"
 

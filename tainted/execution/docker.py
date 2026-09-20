@@ -14,14 +14,12 @@ repository (`analyze`) is deliberately not done here; see `DockerExecutor.analyz
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from typing import Iterator, Optional, Protocol
 
 import tainted
 from tainted.execution.base import (
-    Executor,
     OnCandidates,
     OnFinding,
     ProveOutcome,
