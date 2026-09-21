@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tainted-cli"
-version = "0.1.2"
+version = "0.1.3"
 description = "Tainted local developer loop — analyze / watch / fix / pre-commit gate."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -15,7 +15,7 @@ authors = [{ name = "Tainted" }]
 # tested together. `tests/test_release_shape.py` fails the release if this drifts from
 # `tainted.__version__`.
 dependencies = [
-    "tainted==0.1.2",
+    "tainted==0.1.3",
     "typer>=0.12",
     "rich>=13.0",
     "watchdog>=4.0",

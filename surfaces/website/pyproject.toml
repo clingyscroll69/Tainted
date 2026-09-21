@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tainted-website"
-version = "0.1.2"
+version = "0.1.3"
 description = "Tainted demonstration website — FastAPI over the engine, cytoscape tool graph."
 requires-python = ">=3.11"
 readme = "README.md"
@@ -14,7 +14,7 @@ authors = [{ name = "Tainted" }]
 # needs the browser the `dynamic` extra carries, which a dependency here cannot ask for on the
 # core's behalf without dragging Playwright into every install: `pip install "tainted[dynamic]"`.
 dependencies = [
-    "tainted==0.1.2",
+    "tainted==0.1.3",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "python-multipart>=0.0.9",
