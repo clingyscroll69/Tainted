@@ -147,6 +147,13 @@ def unseal(cookie: Optional[str]) -> Optional[Session]:
         blob = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4))
     except (ValueError, TypeError):
         return None
+    # Canonical encoding only. A final base64 character can carry bits that decode discards,
+    # so several distinct cookie strings decode to one ciphertext and AES-GCM opens all of
+    # them. Nothing is forged by that — it takes a valid cookie to start with — but `unseal`
+    # promises that a cookie which is not the one sealed does not open, and one session must
+    # not answer to more than one string. Re-encoding is the cheapest way to say so.
+    if base64.urlsafe_b64encode(blob).rstrip(b"=").decode() != body:
+        return None
     if len(blob) <= _NONCE_BYTES:
         return None
     try:

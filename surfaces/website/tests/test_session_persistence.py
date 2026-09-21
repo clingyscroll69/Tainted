@@ -223,3 +223,27 @@ def test_derivation_is_stable_across_instances(hosted):
     first = keys.derive(b"tainted/website/session/v1")
     cold_start()
     assert keys.derive(b"tainted/website/session/v1") == first
+
+
+def test_a_non_canonical_re_encoding_of_the_same_bytes_does_not_open(hosted):
+    """The flipped-character case above was flaky for this reason, ~6% of seals.
+
+    The final base64 character of a body whose length is 3 mod 4 carries four significant
+    bits and two that are discarded on decode. Flipping only those two yields a different
+    cookie string that decodes to byte-identical ciphertext, so AES-GCM — correctly — opens
+    it. Nothing is forged: an attacker who can do this already holds a valid cookie. But
+    `unseal` promises that a cookie which is not exactly the one sealed does not open, and
+    two strings mapping to one session is not that promise.
+    """
+    cookie = session_token.seal("gho_secret-token", "octocat")
+    prefix, _, body = cookie.partition(".")
+    raw = base64.urlsafe_b64decode(body + "=" * (-len(body) % 4))
+
+    # Set the discarded trailing bits, which canonical encoding always leaves clear.
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    last = body[-1]
+    noncanonical = body[:-1] + alphabet[alphabet.index(last) | 0b11]
+    assert noncanonical != body
+    assert base64.urlsafe_b64decode(noncanonical + "=" * (-len(noncanonical) % 4)) == raw
+
+    assert session_token.unseal(f"{prefix}.{noncanonical}") is None
