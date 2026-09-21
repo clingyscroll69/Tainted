@@ -179,3 +179,30 @@ def test_a_not_reproduced_attack_says_it_was_attempted_and_held():
     note = [n for n in report.coverage if n.check is Check.CLASSIC_INJECTION][0]
     assert "Not attempted" not in note.detail
     assert "did not succeed" in note.detail
+
+
+def test_a_reported_finding_does_not_claim_an_attack_ran():
+    """REPORTED is argued from the code; NOT_REPRODUCED is an attack that ran and held.
+
+    Collapsing them was the first fix's own blind spot: an unreachable target comes back
+    REPORTED, and telling that reader "the attack ran and did not succeed" invents a result
+    from a run that never reached the app.
+    """
+    from tainted.models import Candidate, SourceLocation
+
+    result = analyze(ROUTES)
+    candidate = Candidate(
+        check=Check.CLASSIC_INJECTION,
+        title="Raw SQL query with a value pasted directly in",
+        location=SourceLocation(file="app.py", line=14),
+        metadata={"kind": "sql"},
+    )
+    result.candidates.append(candidate)
+    report = build_report(
+        result, [Finding(candidate=candidate, status=FindingStatus.REPORTED)]
+    )
+
+    note = [n for n in report.coverage if n.check is Check.CLASSIC_INJECTION][0]
+    assert note.proved is False
+    assert "the attack ran" not in note.detail
+    assert "no attack was run" in note.detail

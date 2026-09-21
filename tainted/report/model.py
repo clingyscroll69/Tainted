@@ -169,13 +169,24 @@ def _coverage(analysis: AnalysisResult, findings: list[Finding]) -> list[Coverag
                 # passed attack.
                 detail = f"Not attempted in this run (static analysis only). {detail}"
                 proved = False
-            elif not any(f.status in _PROOF_ESTABLISHING for f in for_check):
-                # Attempted, and it held. That is a real result and a different one from
-                # never having tried — the note must not claim either the proof or the silence.
+            elif any(f.status in _PROOF_ESTABLISHING for f in for_check):
+                pass  # An attack ran and the hole was real. The rule's own detail stands.
+            elif any(f.status is FindingStatus.NOT_REPRODUCED for f in for_check):
+                # Attempted, and it held. A real result, and a different one from never
+                # having tried — the note must claim neither the proof nor the silence.
                 detail = (
                     f"Attempted in this run: the attack ran and did not succeed. That is "
                     f"evidence, not a guarantee — it rules out this exploit, not the hole. "
                     f"{detail}"
+                )
+                proved = False
+            else:
+                # Argued from the code and never fired — an unreachable target lands here.
+                # Saying the attack ran would invent a result from a run that never reached
+                # the app, which is the same overclaim in a quieter voice.
+                detail = (
+                    f"Argued from the code in this run; no attack was run, so nothing here "
+                    f"is proof. {detail}"
                 )
                 proved = False
         notes.append(CoverageNote(check=check, proved=proved, detail=detail))

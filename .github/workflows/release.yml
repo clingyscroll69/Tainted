@@ -163,11 +163,19 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/setup-qemu-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           push: true
+          # Both architectures, because the runner is amd64 and half the people who will run
+          # `prove` are on an Apple Silicon Mac. v0.1.2 shipped amd64 only, and on arm64
+          # `docker pull` failed outright with "no matching manifest for linux/arm64/v8" —
+          # `prove` could not run at all there, since DockerExecutor never builds or pulls a
+          # substitute. The arm64 leg is emulated and slow to build; that cost is paid once
+          # per release, by us, instead of every `prove` being impossible for those users.
+          platforms: linux/amd64,linux/arm64
           tags: |
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:${{ needs.version.outputs.version }}
             ${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.image }}:latest
