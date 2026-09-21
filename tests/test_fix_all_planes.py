@@ -236,3 +236,47 @@ def test_command_injection_fix_removes_the_shell_instead_of_filtering_input():
     )
     result = core_fix(finding)
     assert "execFile" in result.edits[0].replacement
+
+
+# --------------------------------------------------------------------------- #
+# The remediation has to be in the language of the file it is fixing
+#
+# Every injection snippet was JavaScript. A Flask repo — the most common shape of the thing
+# Tainted is for — got `await db.query(...)` with `//` comments as the fix for its Python.
+# The advice was right and the reader could not use it.
+# --------------------------------------------------------------------------- #
+def _injection_candidate(path: str, kind: str = "sql", snippet: str = "") -> Candidate:
+    from tainted.models import SourceLocation
+
+    return Candidate(
+        check=Check.CLASSIC_INJECTION,
+        title="raw query",
+        location=SourceLocation(file=path, line=1, snippet=snippet),
+        metadata={"kind": kind},
+    )
+
+
+def test_a_python_file_gets_a_python_sql_fix():
+    from tainted.fix.deterministic import generate_injection_fix
+
+    edits, _ = generate_injection_fix(_injection_candidate("app.py"))
+    body = edits[0].replacement
+    assert "await db.query" not in body
+    assert not body.lstrip().startswith("//")
+    assert "execute(" in body and "%s" in body
+
+
+def test_a_typescript_file_still_gets_the_javascript_sql_fix():
+    from tainted.fix.deterministic import generate_injection_fix
+
+    edits, _ = generate_injection_fix(_injection_candidate("route.ts"))
+    assert "await db.query" in edits[0].replacement
+
+
+def test_a_python_command_injection_fix_does_not_recommend_execFile():
+    from tainted.fix.deterministic import generate_injection_fix
+
+    edits, _ = generate_injection_fix(_injection_candidate("worker.py", kind="command"))
+    body = edits[0].replacement
+    assert "execFile" not in body
+    assert "subprocess.run" in body

@@ -192,29 +192,70 @@ _TEMPLATE_FIX = """\
 return render_template('report.html', title=user_title)
 """
 
+# The Python half. Every snippet above is JavaScript, which is wrong for a Flask or FastAPI
+# repo — the most common shape of the thing Tainted is pointed at. The advice was already
+# right; it just arrived in a language the reader could not paste into their file.
+_SQL_FIX_PY = """\
+# Bind the value instead of pasting it into the string. The driver escapes a bound value;
+# an f-string cannot, no matter how carefully you check the input first.
+cur.execute("SELECT * FROM items WHERE id = %s", (item_id,))
+"""
+
+_ORDER_BY_FIX_PY = """\
+# A column name can't be bound as a parameter. That's why dynamic ORDER BY survives an
+# otherwise safe codebase. Whitelist the column instead of binding it.
+SORTABLE = {"name": "name", "created": "created_at", "amount": "amount"}
+column = SORTABLE.get(request.args.get("sort"), "created_at")
+direction = "ASC" if request.args.get("dir") == "asc" else "DESC"
+cur.execute(f"SELECT * FROM items ORDER BY {column} {direction}")  # both values are ours
+"""
+
+_COMMAND_FIX_PY = """\
+# Never build a shell string from user input. Pass arguments as a list and skip the shell,
+# so there's no character left for an attacker to use.
+import subprocess
+subprocess.run(["convert", input_path, output_path], shell=False, check=True)
+"""
+
+# Keyed by kind, then by whether the file being fixed is Python.
+_INJECTION_SNIPPETS: dict[str, tuple[str, str]] = {
+    # kind:        (python,            javascript)
+    "order_by": (_ORDER_BY_FIX_PY, _ORDER_BY_FIX),
+    "sql": (_SQL_FIX_PY, _SQL_FIX),
+    "command": (_COMMAND_FIX_PY, _COMMAND_FIX),
+    "template": (_TEMPLATE_FIX, _TEMPLATE_FIX),
+}
+
+
+def _snippet_for(kind: str, file: str) -> str:
+    """The remediation for this hole, in the language of the file that has it."""
+    python, javascript = _INJECTION_SNIPPETS[kind]
+    return python if file.endswith(".py") else javascript
+
 
 def generate_injection_fix(candidate: Candidate) -> tuple[list[FileEdit], str]:
     """The fix for a classic injection hole, by kind."""
     kind = candidate.metadata.get("kind", "sql")
     snippet = candidate.location.snippet or ""
+    file = candidate.location.file or ""
     if kind == "sql" and re.search(r"order\s+by", snippet, re.I):
-        replacement, note = _ORDER_BY_FIX, (
+        replacement, note = _snippet_for("order_by", file), (
             "A dynamic ORDER BY can't be parameterized. Bind the direction and whitelist "
             "the column. This is the injection most likely to survive an ORM-based codebase."
         )
     elif kind == "sql":
-        replacement, note = _SQL_FIX, (
+        replacement, note = _snippet_for("sql", file), (
             "Replace the pasted-in value with a bound parameter. The fix itself is mechanical. "
             "Check whether the query needed a shape the ORM made awkward, since that's usually "
             "why it was skipped here."
         )
     elif kind == "command":
-        replacement, note = _COMMAND_FIX, (
+        replacement, note = _snippet_for("command", file), (
             "Drop the shell. `execFile` or `subprocess.run([...], shell=False)` passes "
             "arguments with no shell to interpret them, so there is nothing to inject into."
         )
     else:
-        replacement, note = _TEMPLATE_FIX, (
+        replacement, note = _snippet_for("template", file), (
             "Render a fixed template and pass the user's value as data. Template injection "
             "runs code, so escaping the input does not fix it. Not compiling it does."
         )

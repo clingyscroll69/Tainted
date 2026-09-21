@@ -61,8 +61,27 @@ _PATTERNS: list[SinkPattern] = [
     ),
     SinkPattern(
         "sql",
-        re.compile(r"cursor\.execute\s*\(\s*f['\"]", re.I),
-        "Python cursor.execute() built with an f-string",
+        # Any receiver, not just one literally named `cursor`: `cur`, `conn.cursor()` and
+        # `db.session` are all as common, and anchoring to the name meant the most likely
+        # spelling of this bug was the one shape that went unreported. The trailing `\{`
+        # requires something actually interpolated, so a plain `f"SELECT 1"` stays quiet.
+        # The quote is captured and matched by backreference, because SQL puts the *other*
+        # quote inside the string all the time (`id = '{x}'`); a plain [^'"]* stops dead on it.
+        re.compile(
+            r"\.(?:execute|executemany|query|raw|unsafe)\s*\(\s*f(['\"])(?:(?!\1).)*\{", re.I
+        ),
+        "Python query built with an f-string",
+        Severity.HIGH,
+        True,
+    ),
+    SinkPattern(
+        "sql",
+        # `.format()` is the same paste with older syntax, and was missed for the same reason.
+        re.compile(
+            r"\.(?:execute|executemany|query|raw|unsafe)\s*\(\s*['\"].*?['\"]\s*\.format\s*\(",
+            re.I,
+        ),
+        "Python query built with .format()",
         Severity.HIGH,
         True,
     ),

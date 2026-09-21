@@ -31,6 +31,28 @@ _SEV_STYLE = {
 }
 
 
+def _render_llm_gap() -> None:
+    """Say when the meaning register was off, rather than letting its silence pass as a result.
+
+    Without a key every `rank_score` is null and every provenance reads `structure`, and the
+    report looks exactly like one the model examined and found nothing to raise. The website
+    announces its configuration gaps at startup for the same reason; the local loop had no
+    equivalent, so the most common way to run Tainted was also the quietest about its own
+    limits.
+    """
+    from tainted.llm.gemini import get_default_client
+
+    # `reload=True` for the same reason `execution.base._llm_or_none` uses it: the client is
+    # process-wide, and a stale one would report the key state of whenever it was first built.
+    if get_default_client(reload=True).available:
+        return
+    console.print(
+        "\n[yellow]Static analysis only.[/yellow] No LLM key, so ranking, labelling and "
+        "applicability judgement did not run —\n[dim]candidates are unranked and nothing was "
+        "filtered out. Set GEMINI_API_KEY to turn the meaning register on.[/dim]"
+    )
+
+
 def render_report(report: Report) -> None:
     s = report.summary
     console.print(
@@ -59,7 +81,11 @@ def render_report(report: Report) -> None:
     # the run did not carry simply vanished from the report that was supposed to account for it.
     items: list = list(report.findings) + list(report.unproven_candidates)
     if not items:
+        # The emptiest report is the one the gap matters most in: "No candidates found" with
+        # the meaning register off reads as a clean bill of health from a run that never
+        # asked for one.
         console.print("\n[green]No candidates found.[/green]")
+        _render_llm_gap()
         return
 
     # `#` and `ID` are how a reader points back at a row. `tainted fix` takes both, and a table
@@ -97,6 +123,7 @@ def render_report(report: Report) -> None:
 
     _render_mutation(report)
     _render_coverage(report)
+    _render_llm_gap()
 
 
 def _render_mutation(report: Report) -> None:
