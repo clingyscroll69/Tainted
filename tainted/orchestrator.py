@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Sequence
 
 from tainted.applicability import BehavioralProbe, decide_plane
+from tainted.budget import Budget
 from tainted.checks.classic_injection import scan_classic_injection
 from tainted.checks.request_plane import analyze_request_plane
 from tainted.checks.test_integrity import CommandRunner, measure_test_integrity
@@ -161,6 +162,7 @@ def prove(
     prober: Optional[RouteProber] = None,
     autodiscover: bool = False,
     on_finding: Optional[Callable[[Finding], None]] = None,
+    budget: Optional["Budget"] = None,
 ) -> list[Finding]:
     """Fire live probes at the running target for each candidate, in ranked order.
 
@@ -202,7 +204,17 @@ def prove(
 
     # Ranked order: structural holes first, then model rank, then severity. Everything is
     # tried — the ordering only decides who goes first.
+    if budget is not None:
+        budget.start()
     for candidate in analysis.ranked():
+        # A budget is checked *between* candidates, never during one: a half-fired probe proves
+        # nothing. When it is spent the loop stops and returns everything proven so far — the
+        # graceful stop. The caller reads `budget.attempted` to report how many were skipped, so
+        # a capped run can never be mistaken for a complete one with no findings.
+        if budget is not None and budget.exhausted() is not None:
+            break
+        if budget is not None:
+            budget.note_attempt()
         finding: Optional[Finding] = None
         if candidate.check in (Check.BOLA, Check.RLS):
             finding = _prove_request_plane(candidate, setup, replay, prober)

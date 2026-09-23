@@ -14,7 +14,10 @@ engine is how the next reader loses an hour.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Protocol
+from typing import TYPE_CHECKING, Callable, Optional, Protocol
+
+if TYPE_CHECKING:
+    from tainted.budget import Budget
 
 from tainted import analyze as core_analyze
 from tainted import prove as core_prove
@@ -46,6 +49,11 @@ class ProveOutcome:
 
     report: Report
     blocked_calls: list[dict] = field(default_factory=list)
+    # What a budget cap stopped short of, when one was set. None means no cap was in play. It
+    # rides on the outcome rather than a side channel because a capped run's central honesty
+    # rule — "everything proven so far, and how much was not reached" — has to survive the trip
+    # back across the container boundary.
+    budget: Optional[dict] = None
 
 
 def _llm_or_none():
@@ -76,6 +84,7 @@ class Executor(Protocol):
         run_key: Optional[bytes] = None,
         on_candidates: Optional[OnCandidates] = None,
         on_finding: Optional[OnFinding] = None,
+        budget: Optional["Budget"] = None,
     ) -> ProveOutcome: ...
 
 
@@ -104,7 +113,9 @@ class LocalExecutor:
         run_key: Optional[bytes] = None,
         on_candidates: Optional[OnCandidates] = None,
         on_finding: Optional[OnFinding] = None,
+        budget: Optional["Budget"] = None,
     ) -> ProveOutcome:
+        from tainted.budget import BudgetOutcome
         from tainted.execution.guard import guarded_prober, guarded_replay
 
         llm = _llm_or_none()
@@ -128,6 +139,7 @@ class LocalExecutor:
             replay, guard = guarded_replay(setup, plan, plan_signature, run_key)
             prober = guarded_prober(setup, guard)
 
+        total_candidates = len(result.ranked())
         findings: list[Finding] = core_prove(
             result,
             setup,
@@ -137,8 +149,21 @@ class LocalExecutor:
             autodiscover=autodiscover,
             llm=llm,
             on_finding=on_finding,
+            budget=budget,
         )
+        budget_out: Optional[dict] = None
+        if budget is not None:
+            reason = budget.exhausted()
+            stopped = reason is not None
+            budget_out = BudgetOutcome(
+                stopped_early=stopped,
+                reason=reason or "ran to completion",
+                attempted=budget.attempted,
+                skipped=max(0, total_candidates - budget.attempted) if stopped else 0,
+                elapsed_seconds=budget.elapsed(),
+            ).as_dict()
         return ProveOutcome(
             report=build_report(result, findings),
             blocked_calls=guard.blocked_calls if guard is not None else [],
+            budget=budget_out,
         )

@@ -87,9 +87,18 @@ def prove(
             "stays as is."
         ),
     ),
+    max_minutes: Optional[float] = typer.Option(
+        None, help="Stop after this many minutes, keeping every hole proven so far."
+    ),
+    max_candidates: Optional[int] = typer.Option(
+        None, help="Stop after attempting this many candidates."
+    ),
 ):
     """Run real attacks against the running app, inside a Docker sandbox. Localhost only."""
+    from tainted.budget import parse_budget
+
     setup = _build_setup(url, login_a, login_b, seed, anon_key)
+    budget = parse_budget(max_minutes, max_candidates)
 
     # Localhost only, and derived rather than asserted. There is no token path to reach: the
     # CLI points at an app you are running, so if the target is not local the honest answer is
@@ -114,6 +123,7 @@ def prove(
             setup,
             ownership_verified=True,  # derived above: the target is genuinely local
             autodiscover=autodiscover,
+            budget=budget,
         )
     except SandboxUnavailable as exc:
         console.print(f"[red]{_e(exc)}[/red]")
@@ -124,6 +134,8 @@ def prove(
 
     report = outcome.report
     render_report(report)
+    if outcome.budget and outcome.budget.get("stopped_early"):
+        console.print(f"[yellow]{_e(outcome.budget['note'])}[/yellow]")
     findings = report.findings
     if any(
         f.status == FindingStatus.PROVEN and f.severity.rank >= Severity.HIGH.rank
@@ -287,6 +299,72 @@ def tutorial(
         f"No tutorial topic '{topic}'. Choose from: "
         + ", ".join(lesson["topic"] for lesson in LESSONS)
     )
+
+
+@app.command()
+def sarif(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    only: Optional[str] = typer.Option(None, help="Run only these checks (comma-separated)"),
+    skip: Optional[str] = typer.Option(None, help="Skip these checks (comma-separated)"),
+):
+    """Emit the analysis as SARIF 2.1.0, with proof strength and the silence ledger.
+
+    Prints to stdout so you can redirect it into your CI's Security tab. Proof strength rides on
+    each result's level (proven = error), and everything the run did not test rides on the run's
+    properties, so an empty results array is never mistaken for full coverage.
+    """
+    from tainted.report.sarif import to_sarif_json
+
+    result = core_analyze(
+        str(repo), llm=_llm_or_none(), only=_parse_checks(only), skip=_parse_checks(skip)
+    )
+    typer.echo(to_sarif_json(build_report(result)))
+
+
+@app.command(name="mutate-security")
+def mutate_security(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    test_cmd: Optional[str] = typer.Option(
+        None, help="Command to run the suite, e.g. 'pytest -q'. Without it, mutants are listed but not run."
+    ),
+):
+    """Remove each authorization check and report the ones no test catches.
+
+    Only surviving security mutants are shown — a line whose ownership predicate could vanish and
+    your suite would stay green. Without a --test-cmd the checks are found but not run, and none is
+    claimed killed, in keeping with the rule that an un-run check never reads as a passed one.
+    """
+    from tainted.checks.security_mutation import run_security_mutation
+
+    cmd = test_cmd.split() if test_cmd else None
+    result = run_security_mutation(str(repo), test_cmd=cmd)
+    console.print(f"[bold]{_e(result.note)}[/bold]")
+    for m in result.survived:
+        console.print(
+            f"  [yellow]survived[/yellow] {_e(m.file)}:{m.line} "
+            f"[{_e(m.operator.name)}]  {_e(m.original)}"
+        )
+    if result.ran and result.survived:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def ledger(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    url: Optional[str] = typer.Option(None, help="Base URL, to enable the behavioral probe rung"),
+):
+    """Show what Tainted did NOT test, and why — the silence ledger as a first-class artifact."""
+    from tainted.report.enrich import silence_ledger
+
+    target = Target(url=url) if url else None
+    result = core_analyze(str(repo), llm=_llm_or_none(), target=target)
+    led = silence_ledger(build_report(result))
+    console.print(f"[bold]{_e(led['headline'])}[/bold]\n")
+    for row in led["skipped_planes"]:
+        console.print(f"  [dim]plane cleared as absent:[/dim] {_e(row['plane'])} — {_e(row['evidence'])}")
+    for row in led["not_proved"]:
+        console.print(f"  [yellow]not fully proven:[/yellow] {_e(row['check'])} — {_e(row['detail'])}")
+    console.print(f"\n[dim]{_e(led['reminder'])}[/dim]")
 
 
 @app.command()

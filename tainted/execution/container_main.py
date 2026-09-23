@@ -65,6 +65,11 @@ def _run(req: RunRequest, key: Optional[bytes], out: TextIO) -> ProveOutcome:
         )
 
     setup = ProveSetup.model_validate(req.setup)
+    budget = None
+    if req.max_seconds is not None or req.max_candidates is not None:
+        from tainted.budget import Budget
+
+        budget = Budget(max_seconds=req.max_seconds, max_candidates=req.max_candidates)
     # Inside the container, in-process IS the containment. LocalExecutor is the right executor
     # here and only here.
     return LocalExecutor().prove(
@@ -75,6 +80,7 @@ def _run(req: RunRequest, key: Optional[bytes], out: TextIO) -> ProveOutcome:
         plan=_plan_from(req.plan),
         plan_signature=req.plan_signature,
         run_key=key,
+        budget=budget,
         on_candidates=lambda cs: _emit(
             out, "candidates", candidates=[c.model_dump(mode="json") for c in cs]
         ),
@@ -101,6 +107,7 @@ def main(stdin: TextIO, stdout: TextIO, env: dict[str, str]) -> int:
         "report",
         report=outcome.report.model_dump(mode="json"),
         blocked_calls=outcome.blocked_calls,
+        budget=outcome.budget,
     )
     return 0
 

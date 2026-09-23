@@ -38,6 +38,39 @@ Tainted states plainly how far it reached rather than assuming it reached everyt
 - `fix(finding)` — writes the fix and re-checks it with whatever proof that kind of
   hole supports.
 
+### Built on those three (added in 0.2.0)
+
+Every one of these is a composition of `analyze` / `prove` / `fix`, and each is honest about the
+one thing it cannot see:
+
+- `preflight(setup)` — refuse to prove until the run is sound, naming the check that isn't:
+  ownership valid, target reachable, account B can log in, and **account A can read A's own
+  record** (if it can't, a "B couldn't read it either" result would be a false all-clear).
+- `reprove(finding, setup)` — re-fire one finding's exploit on demand, decoupled from patching.
+  `proven → fixed → proven-again` is a regression nobody else can name.
+- `second_opinion(finding, setup)` — fire a previously-proven exploit at a **patched** target (a
+  branch, someone else's autofix). Still open, fixed, or secured-but-the-owner-is-locked-out —
+  backed by a fired exploit rather than a re-scan.
+- `regression_check(repo, edits, test_cmd)` — run the repo's own suite before and after a patch,
+  so a fix is only `FIXED` when the attack is closed **and** nothing else broke.
+- `pairing_diff(base, head)` — the new agent source+sink co-locations a change introduced, scoped
+  honestly to the repository-declared graph.
+- `completion_gate(findings)` — a pass/block verdict for a coding agent: no new **proven** hole.
+- `prove(..., budget=Budget(max_seconds=..., max_candidates=...))` — cap a run and stop
+  gracefully, emitting everything proven so far and how much it did not reach.
+
+Every report also carries three projections (`tainted.report.enrich`): a **0-100 priority**
+(severity × proof strength — a proven low outranks a reported critical), **standard ids** tiered
+`(proven)` vs `(static)` (OWASP ASI/API, MITRE ATLAS, CWE), and a **silence ledger** of what was
+not tested and why. `tainted.report.sarif.to_sarif` emits SARIF 2.1.0 with proof strength on each
+result and the silence ledger on the run. Proven findings can emit a `curl` line and a
+zero-dependency replay script (`tainted.repro`), with credentials scrubbed to env references.
+
+New surface entry points: `tainted sarif|ledger|mutate-security` and `--max-minutes` /
+`--max-candidates` on the CLI; `tainted_sarif`, `tainted_ledger`, `tainted_mutate_security` MCP
+tools plus enriched `tainted_analyze`; `TAINTED_SARIF` and `TAINTED_DIFF_ONLY` in CI; and
+`/api/sarif`, `/api/ledger` on the website.
+
 ## Checks, and how far each one is proven
 
 | Check | Static | Dynamic proof |

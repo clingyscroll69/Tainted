@@ -25,7 +25,9 @@ The rule is conditional on the target:
 
 from __future__ import annotations
 
+import hashlib
 import secrets
+import time
 from enum import Enum
 from typing import Any, Callable, Optional
 
@@ -70,17 +72,26 @@ _MAX_WELL_KNOWN_BYTES = 4096
 WELL_KNOWN_PATH = "/.well-known/tainted-verify"
 
 
-def verify_well_known(
-    target: Target, expected_token: str, client: Optional[httpx.Client] = None
-) -> OwnershipResult:
-    """Fetch `https://<host>/.well-known/tainted-verify` and require it to *equal* the token.
+def hidden_well_known_path(expected_token: str) -> str:
+    """A per-project verification path, so a co-tenant on a shared host cannot claim the domain.
 
-    Equality, not containment: see the module docstring. Redirects are not followed, because
-    a redirect means the answer came from somewhere other than the host being claimed, and
-    the read is capped so the response cannot be unbounded.
+    `/.well-known/tainted-verify` at a fixed, guessable path is claimable by anyone who can serve
+    a file on the host — on a shared host, a wildcard-routed SaaS subdomain, or an app that
+    reflects arbitrary `.well-known` paths, that is not the owner. Deriving the path from a keyed
+    hash of the token means only someone who already holds the issued token knows where to put
+    the file, which is the property HackerOne's hidden-path scheme buys and the fixed path does
+    not. The token still has to *equal* the expected value once fetched — this only moves the
+    file somewhere an impostor cannot guess.
     """
-    client = client or httpx.Client(timeout=10.0)
-    url = target.url.rstrip("/") + WELL_KNOWN_PATH
+    digest = hashlib.sha256(f"tainted-verify\n{expected_token.strip()}".encode("utf-8")).hexdigest()
+    return f"/.well-known/tainted/{digest[:32]}.txt"
+
+
+def _fetch_and_compare(
+    target: Target, path: str, expected_token: str, client: httpx.Client
+) -> OwnershipResult:
+    """Fetch one path and require the (capped) body to *equal* the token. No redirects."""
+    url = target.url.rstrip("/") + path
     try:
         with client.stream("GET", url, follow_redirects=False) as resp:
             if resp.status_code != 200:
@@ -108,6 +119,26 @@ def verify_well_known(
         OwnershipMethod.WELL_KNOWN,
         f"GET {url} -> 200, body {'matches' if ok else 'does not equal'} the expected token",
     )
+
+
+def verify_well_known(
+    target: Target, expected_token: str, client: Optional[httpx.Client] = None
+) -> OwnershipResult:
+    """Verify the `.well-known` ownership file, hidden path first, then the fixed path.
+
+    The hidden path (`hidden_well_known_path`) is preferred because a co-tenant on a shared host
+    cannot guess where to put the file. The fixed `/.well-known/tainted-verify` is still accepted
+    as a fallback, so a value published before hidden paths existed keeps verifying. Either way
+    the body must *equal* the token — equality, not containment — and redirects are never
+    followed, since a redirect means the answer came from somewhere other than the claimed host.
+    """
+    client = client or httpx.Client(timeout=10.0)
+    hidden = _fetch_and_compare(
+        target, hidden_well_known_path(expected_token), expected_token, client
+    )
+    if hidden.verified:
+        return hidden
+    return _fetch_and_compare(target, WELL_KNOWN_PATH, expected_token, client)
 
 
 def verify_dns_txt(
@@ -235,3 +266,51 @@ def verify(
     if dns_result.verified:
         return dns_result
     return verify_well_known(target, expected_token, client=client)
+
+
+# --------------------------------------------------------------------------- #
+# Freshness — a proof of ownership has a shelf life
+# --------------------------------------------------------------------------- #
+# Detectify pauses scanning the moment the verification record disappears; ownership proven months
+# ago is not ownership now. So a proof is stamped when it is taken, and a run re-checks that the
+# stamp is recent enough before firing. Local targets are exempt: reaching localhost is proof of
+# machine control at the moment of the run, with no record on a remote host to go stale.
+DEFAULT_OWNERSHIP_TTL_SECONDS = 24 * 3600
+
+
+class OwnershipProof:
+    """A verified ownership result plus when it was taken, so staleness is checkable later."""
+
+    def __init__(self, result: "OwnershipResult", verified_at: Optional[float] = None):
+        self.result = result
+        self.verified_at = verified_at if verified_at is not None else time.time()
+
+    @property
+    def verified(self) -> bool:
+        return bool(self.result)
+
+    def is_fresh(self, ttl_seconds: float = DEFAULT_OWNERSHIP_TTL_SECONDS, now: Optional[float] = None) -> bool:
+        current = now if now is not None else time.time()
+        return self.verified and (current - self.verified_at) <= ttl_seconds
+
+    def freshness_note(self, ttl_seconds: float = DEFAULT_OWNERSHIP_TTL_SECONDS, now: Optional[float] = None) -> str:
+        current = now if now is not None else time.time()
+        age = max(0, int(current - self.verified_at))
+        if not self.verified:
+            return "Ownership was never verified."
+        if self.is_fresh(ttl_seconds, now):
+            return f"Ownership verified via {self.result.method.value} {age}s ago (within TTL)."
+        return (
+            f"Ownership proof is stale: verified via {self.result.method.value} {age}s ago, past "
+            f"the {int(ttl_seconds)}s TTL. Re-verify before proving — the record may have been "
+            f"removed since."
+        )
+
+    def as_dict(self, ttl_seconds: float = DEFAULT_OWNERSHIP_TTL_SECONDS, now: Optional[float] = None) -> dict:
+        return {
+            "verified": self.verified,
+            "method": self.result.method.value,
+            "verified_at": self.verified_at,
+            "fresh": self.is_fresh(ttl_seconds, now),
+            "note": self.freshness_note(ttl_seconds, now),
+        }

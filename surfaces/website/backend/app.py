@@ -413,6 +413,30 @@ def api_analyze(req: AnalyzeRequest, request: Request):
     return JSONResponse(report.model_dump(mode="json"))
 
 
+@app.post("/api/sarif")
+def api_sarif(req: AnalyzeRequest, request: Request):
+    """The analysis as SARIF 2.1.0 — proof strength per result, silence ledger per run."""
+    from tainted.report.sarif import to_sarif
+
+    if demo_mode.is_demo(req.repo_path, req.repo):
+        return JSONResponse(to_sarif(demo_mode.demo_analyze_report()))
+    with _checkout(req, request) as repo_path:
+        report = _executor.analyze(repo_path)
+    return JSONResponse(to_sarif(report))
+
+
+@app.post("/api/ledger")
+def api_ledger(req: AnalyzeRequest, request: Request):
+    """What the run did NOT test, and why — the silence ledger as its own artifact."""
+    from tainted.report.enrich import silence_ledger
+
+    if demo_mode.is_demo(req.repo_path, req.repo):
+        return JSONResponse(silence_ledger(demo_mode.demo_analyze_report()))
+    with _checkout(req, request) as repo_path:
+        report = _executor.analyze(repo_path)
+    return JSONResponse(silence_ledger(report))
+
+
 # --------------------------------------------------------------------------- #
 # Watching a run instead of waiting for it
 #

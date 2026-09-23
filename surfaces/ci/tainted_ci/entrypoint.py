@@ -22,6 +22,7 @@ catch nobody asked for.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 
 from tainted import analyze as core_analyze
@@ -64,6 +65,25 @@ def _setup_from_env() -> ProveSetup | None:
     )
 
 
+def _changed_files(repo: str, base_ref: str) -> set[str]:
+    """Files changed against a base ref, via `git diff --name-only`. Empty set on any failure.
+
+    Diff-awareness is opt-in and fails open: if git is unavailable or the base ref cannot be
+    resolved, the scan stays whole-repo rather than silently narrowing to nothing, because a
+    scan that quietly covered no files is the exact false all-clear this tool exists to avoid.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo, "diff", "--name-only", f"{base_ref}...HEAD"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if proc.returncode != 0:
+        return set()
+    return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+
+
 def run() -> int:
     # A pipeline that is not configured yet has nothing to scan worth reading. Let it ask
     # for the walkthrough instead, from inside the same container the job already runs.
@@ -80,6 +100,19 @@ def run() -> int:
     result = core_analyze(
         repo, llm=llm, target=setup.target if setup else None
     )
+
+    # Diff-awareness (opt-in). With TAINTED_DIFF_ONLY set and a base ref available, keep only the
+    # candidates whose file the PR actually touched — so the gate speaks to this change, not the
+    # whole repository's history. Fails open: an unresolvable diff leaves every candidate in.
+    if os.environ.get("TAINTED_DIFF_ONLY", "").lower() in ("1", "true", "yes"):
+        base_ref = os.environ.get("TAINTED_DIFF_BASE") or os.environ.get("GITHUB_BASE_REF", "")
+        if base_ref:
+            changed = _changed_files(repo, base_ref)
+            if changed:
+                result.candidates = [
+                    c for c in result.candidates if c.location.file in changed
+                ]
+
     findings = []
 
     prove_note = "prove skipped: no TAINTED_TARGET_URL"
@@ -103,6 +136,21 @@ def run() -> int:
         fix_note = _open_fix_pr(repo, findings, setup)
 
     report = build_report(result, findings)
+
+    # SARIF for the Security tab, when asked. Proof strength rides on each result's level and the
+    # silence ledger rides on the run's properties, so an empty results array is never read as
+    # full coverage.
+    sarif_path = os.environ.get("TAINTED_SARIF", "").strip()
+    if sarif_path:
+        from tainted.report.sarif import to_sarif_json
+
+        try:
+            with open(sarif_path, "w", encoding="utf-8") as fh:
+                fh.write(to_sarif_json(report))
+            print(f"::notice::Tainted wrote SARIF to {sarif_path}")
+        except OSError as exc:
+            print(f"::warning::could not write SARIF to {sarif_path}: {exc}")
+
     markdown = render_markdown(report, prove_note)
     if fix_note:
         markdown += f"\n\n{fix_note}\n"
