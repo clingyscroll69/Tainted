@@ -125,7 +125,11 @@ def verify_dns_txt(
 
     host = urlparse(target.url).hostname or ""
     if resolver is None:
-        resolver = _default_dns_resolver
+        # Called, not referenced: `_default_dns_resolver` builds the resolver. Assigned bare,
+        # the None check below could never fire, and the lookup called the factory with a
+        # hostname, so every DNS verification without an injected resolver failed as
+        # "lookup failed: takes 0 positional arguments", dnspython installed or not.
+        resolver = _default_dns_resolver()
         if resolver is None:
             return OwnershipResult(
                 False, OwnershipMethod.DNS_TXT, "dnspython not installed"
@@ -144,7 +148,7 @@ def verify_dns_txt(
     )
 
 
-def _default_dns_resolver():
+def _default_dns_resolver() -> Optional[Callable[[str], list[str]]]:
     try:
         import dns.resolver  # type: ignore
     except Exception:

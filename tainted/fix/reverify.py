@@ -4,9 +4,9 @@ Request-plane fixes don't reshape anything, so Tainted just runs the same attack
 checks two things: it fails, and the real owner can still read their own record. A policy
 that locks out the real owner is broken even though it's secure.
 
-Tool-plane fixes can reshape the graph itself, so Tainted rebuilds the graph, finds the hole
-in whatever form it now takes, and attacks that. This also catches a fix that moves the hole
-somewhere else instead of closing it.
+Tool-plane fixes reshape the graph itself, so Tainted rebuilds the graph as the fix leaves it
+and looks for the pairing again, wherever it now sits. That also catches a fix that moves the
+hole somewhere else instead of closing it.
 """
 
 from __future__ import annotations
@@ -100,125 +100,178 @@ def _classify(attack_blocked: bool, legit_ok: bool) -> FindingStatus:
 
 
 # --------------------------------------------------------------------------- #
-# Tool plane: rebuild the graph, then attack it fresh
+# Tool plane: rebuild the graph as the fix leaves it, then look for the pairing
 # --------------------------------------------------------------------------- #
-def reverify_tool_plane(
-    fix: FixResult,
-    repo_path: str,
-    llm=None,
-    driver=None,
-) -> FixResult:
-    """Rebuild the graph from the fixed config and attack whatever it looks like now.
+def reverify_tool_plane(fix: FixResult, repo_path: Optional[str] = None) -> FixResult:
+    """Rebuild the agent graph as it stands once the fix's edits are in, and re-check it.
 
-    A tool-plane fix can fail in a way a request-plane fix can't: it can move the hole
-    instead of closing it. So the second check is not "legitimate access survives" but
-    "no source-and-sink scope reappeared elsewhere in the graph."
+    The graph is built in memory, never read back from disk after the fact: the fix's edits
+    are new files the developer has not applied yet, so re-reading the repository would only
+    re-find the hole the fix closes. It starts from the repository's scopes when one is given
+    (or from the candidate's own scope when not), drops any scope an edit's file supersedes,
+    adds the scopes the edits declare, and, for a scope split, retires the agent the split
+    replaces.
+
+    Roles come from the finding itself: analysis already decided which of these tools read
+    untrusted content and which act, so no model is needed to ask again. Two checks follow:
+
+      * the pairing is gone, or, for a fix that keeps it by design, a gate covers every sink;
+      * the hole did not relocate: no other agent now holds one of these sources and one of
+        these sinks. A split can fail this way, and a re-run attack would never notice.
+
+    A gate is a runtime behavior the sandbox cannot run, so a gated fix whose config is
+    complete is REPORTED, never FIXED: complete on paper, unproven in execution.
     """
-    from tainted.checks.tool_plane import analyze_tool_plane, colocated_scopes, label_scopes
-    from tainted.dynamic.sandbox import run_sandbox
-    from tainted.llm.client import LLMUnavailable
-    from tainted.static.tools import discover_scopes
+    import json
 
-    original_scope = fix.finding.candidate.metadata.get("scope")
+    from tainted.fix.interview import ToolRemediation
+    from tainted.static.tools import AgentScope, ToolSpec, discover_scopes, parse_mcp_manifest
 
-    # ---- Re-analyse: what does the graph look like now? ---- #
-    scopes = discover_scopes(repo_path)
-    if llm is not None:
+    candidate = fix.finding.candidate
+    scope_name = candidate.metadata.get("scope", "agent")
+    sources = {t.strip() for t in (candidate.source or "").split(",") if t.strip()}
+    sinks = {t.strip() for t in (candidate.sink or "").split(",") if t.strip()}
+    roles = {**{n: "source" for n in sources}, **{n: "sink" for n in sinks}}
+    remediation = fix.metadata.get("remediation")
+    edited = {e.file for e in fix.edits}
+
+    # ---- The graph before: the repository's scopes, or this one agent ---- #
+    if repo_path is not None:
+        scopes = [s for s in discover_scopes(repo_path) if s.source_file not in edited]
+    else:
+        scopes = [
+            AgentScope(
+                name=scope_name,
+                kind=candidate.metadata.get("kind", "mcp"),
+                source_file=candidate.location.file,
+                tools=[ToolSpec(name=n) for n in sorted(sources | sinks)],
+            )
+        ]
+
+    # ---- The graph after: the fix's own agents in, the split's original out ---- #
+    gates: dict = {}
+    added: list[AgentScope] = []
+    for edit in fix.edits:
         try:
-            label_scopes(scopes, llm)
-        except LLMUnavailable:
-            llm = None
-    colocated = colocated_scopes(scopes) if llm is not None else []
+            data = json.loads(edit.replacement)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(data, dict):
+            continue
+        if "tools" in data:
+            added.extend(parse_mcp_manifest(data, edit.file))
+        for key in ("mediation", "sink_confirmation", "provenance"):
+            if isinstance(data.get(key), dict):
+                gates[key] = data[key]
+    if remediation == ToolRemediation.SCOPE_SPLIT.value and added:
+        scopes = [
+            s for s in scopes
+            if not (s.name == scope_name and s.source_file == candidate.location.file)
+        ]
+    graph = [
+        AgentScope(
+            name=s.name,
+            kind=s.kind,
+            source_file=s.source_file,
+            tools=[ToolSpec(name=t.name, role=roles.get(t.name)) for t in s.tools],
+            coded=s.coded,
+        )
+        for s in scopes + added
+    ]
+    added_ids = {(s.name, s.source_file) for s in added}
 
-    still_colocated = [s for s in colocated if s.name == original_scope]
-    relocated = [s for s in colocated if s.name != original_scope]
+    def pairs(s: AgentScope) -> bool:
+        held = {t.name for t in s.tools}
+        return bool(held & sources) and bool(held & sinks)
 
-    # ---- Check 1: a fresh attack on the reshaped graph fails ---- #
-    if llm is None:
+    original = [
+        s for s in graph if s.name == scope_name and (s.name, s.source_file) not in added_ids
+    ]
+    original_ids = {id(s) for s in original}
+    still_paired = any(pairs(s) for s in original)
+
+    # ---- Check 1: the pairing is gone, or gated on every sink ---- #
+    if not still_paired:
         fix.assertions.append(
             ReverifyAssertion(
-                name="fresh_attack_fails",
-                passed=False,
+                name="pairing_gone",
+                passed=True,
                 detail=(
-                    "No model was available to re-check the reshaped graph or build a fresh "
-                    "attack, so this fix is unverified. That does not mean it is wrong. It "
-                    "means Tainted has not checked, which is the honest thing to say."
+                    f"In the graph the fix leaves, no single agent `{scope_name}` holds both "
+                    f"{', '.join(sorted(sources))} and {', '.join(sorted(sinks))}. The pairing "
+                    f"the attack depended on is gone."
                 ),
             )
         )
-        fix.resulting_status = FindingStatus.REPORTED
-        return fix
-
-    if not still_colocated:
+    elif gates:
+        uncovered = sorted(sinks - _gated_sinks(gates))
+        unmarked = sorted(sources - set(gates.get("provenance", {}).get("taint_sources", sources)))
+        missing = uncovered + unmarked
         fix.assertions.append(
             ReverifyAssertion(
-                name="fresh_attack_fails",
-                passed=True,
+                name="gate_covers_every_sink",
+                passed=not missing,
                 detail=(
-                    f"Agent `{original_scope}` no longer holds both tools. The pairing the "
-                    f"attack depended on is gone."
+                    f"`{scope_name}` keeps both tools by design, and the gate covers "
+                    f"{', '.join(sorted(sinks))}."
+                    if not missing
+                    else f"`{scope_name}` keeps both tools, and the gate leaves "
+                    f"{', '.join(missing)} ungated. The attack still has a way through."
                 ),
             )
         )
     else:
-        scope = still_colocated[0]
-        candidates = analyze_tool_plane(repo_path, llm=llm)
-        fresh = [c for c in candidates if c.metadata.get("scope") == original_scope]
-        if not fresh:
-            fix.assertions.append(
-                ReverifyAssertion(
-                    name="fresh_attack_fails",
-                    passed=True,
-                    detail="This scope no longer looks attackable after the fix.",
-                )
+        fix.assertions.append(
+            ReverifyAssertion(
+                name="pairing_gone",
+                passed=False,
+                detail=(
+                    f"`{scope_name}` still holds {', '.join(sorted(sources))} and "
+                    f"{', '.join(sorted(sinks))}, and nothing gates them."
+                ),
             )
-        else:
-            try:
-                injection = llm.generate_injection(
-                    {
-                        "scope": scope.name,
-                        "sources": [t.as_prompt_dict() for t in scope.sources],
-                        "sinks": [t.as_prompt_dict() for t in scope.sinks],
-                    }
-                )
-                result = run_sandbox(fresh[0], scope, injection, driver) if driver else None
-            except LLMUnavailable:
-                result = None
-            if result is None:
-                fix.assertions.append(
-                    ReverifyAssertion(
-                        name="fresh_attack_fails",
-                        passed=False,
-                        detail="Could not run a fresh attack, so this fix is unverified.",
-                    )
-                )
-            else:
-                blocked = result.status != FindingStatus.PROVEN
-                fix.assertions.append(
-                    ReverifyAssertion(
-                        name="fresh_attack_fails",
-                        passed=blocked,
-                        detail=(result.proof.notes if result.proof else ""),
-                    )
-                )
+        )
 
     # ---- Check 2: the hole did not just move ---- #
-    new_names = {s.name for s in relocated}
+    relocated = sorted({s.name for s in graph if pairs(s) and id(s) not in original_ids})
+    searched = (
+        "any agent in the repository"
+        if repo_path is not None
+        else "the agents this fix writes (no repository was given, so no others were searched)"
+    )
     fix.assertions.append(
         ReverifyAssertion(
             name="hole_did_not_relocate",
-            passed=not new_names,
+            passed=not relocated,
             detail=(
-                f"A new agent now holds both tools: {', '.join(sorted(new_names))}. "
-                f"The fix moved the hole instead of closing it."
-                if new_names
-                else "No other agent picked up both tools."
+                f"A new agent now holds both tools: {', '.join(relocated)}. The fix moved the "
+                f"hole instead of closing it."
+                if relocated
+                else f"The pairing did not reappear in {searched}."
             ),
         )
     )
 
-    fix.resulting_status = (
-        FindingStatus.FIXED if fix.all_assertions_passed else FindingStatus.PROVEN
-    )
+    if not fix.all_assertions_passed:
+        fix.resulting_status = (
+            FindingStatus.PROVEN
+            if fix.finding.status is FindingStatus.PROVEN
+            else FindingStatus.REPORTED
+        )
+    elif still_paired:
+        # Gated, completely, on paper. Whether the gate holds is your runtime's to enforce, and
+        # the sandbox cannot run it, so this is not a proof that the attack now fails.
+        fix.resulting_status = FindingStatus.REPORTED
+    else:
+        fix.resulting_status = FindingStatus.FIXED
     fix.finding.status = fix.resulting_status
     return fix
+
+
+def _gated_sinks(gates: dict) -> set[str]:
+    """Every sink a gate config names, across the three gate shapes."""
+    named: set[str] = set()
+    named.update(gates.get("mediation", {}).get("require_human_approval", []))
+    named.update(gates.get("sink_confirmation", {}).get("tools", []))
+    named.update(gates.get("provenance", {}).get("guarded_sinks", []))
+    return named

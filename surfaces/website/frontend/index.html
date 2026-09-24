@@ -7675,12 +7675,19 @@ html.is-diving,html.is-diving body{overflow:hidden}
         l.startsWith('+') ? '<span class="add">' + l + '</span>'
         : l.startsWith('-') ? '<span class="del">' + l + '</span>' : l).join('\n')
     ).join('\n\n');
+    /* The engine's re-check of its own patch, where it made one: for an agent-injection fix,
+       the graph rebuilt as the patch leaves it. A pass is cyan like any check that held; a
+       failure is warm, since it means the patch as written leaves the hole open. */
+    const checks = (fix.assertions || []).map(a =>
+      '<span class="' + (a.passed ? 'ok' : 'hit') + '">' + (a.passed ? 'PASS ' : 'FAIL ') +
+      ESC(a.name) + '</span>  <span class="dim">' + ESC(a.detail) + '</span>').join('\n');
     box.innerHTML = '<div class="ph"><span class="lbl">' +
       (hasEdits ? 'Suggested patch' : 'Not written &mdash; this fix needs your answer') +
       '</span><span class="step">' +
       (hasEdits ? 'apply it yourself; no working tree here' : 'underdetermined by the code') +
       '</span></div><pre>' + diff +
-      (fix.notes ? (diff ? '\n\n' : '') + '<span class="dim">' + ESC(fix.notes) + '</span>' : '') +
+      (checks ? (diff ? '\n\n' : '') + checks : '') +
+      (fix.notes ? (diff || checks ? '\n\n' : '') + '<span class="dim">' + ESC(fix.notes) + '</span>' : '') +
       '</pre>';
     return box;
   }

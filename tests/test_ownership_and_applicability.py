@@ -188,3 +188,29 @@ def test_well_known_refuses_a_body_too_large_to_be_a_token():
 def test_dns_txt_requires_the_whole_record_to_match():
     resolver = lambda host: [f"tainted-verify={TOKEN}-and-then-some"]  # noqa: E731
     assert not verify_dns_txt(Target(url="https://app.example.com"), TOKEN, resolver=resolver).verified
+
+
+def test_dns_verification_runs_its_own_resolver_when_none_is_injected(monkeypatch):
+    """The default resolver was assigned uncalled, so this path failed on every real run."""
+    import sys
+    import types
+
+    record = types.SimpleNamespace(strings=[f"tainted-verify={TOKEN}".encode()])
+    fake = types.ModuleType("dns.resolver")
+    fake.resolve = lambda host, kind: [record]  # type: ignore[attr-defined]
+    package = types.ModuleType("dns")
+    package.resolver = fake  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "dns", package)
+    monkeypatch.setitem(sys.modules, "dns.resolver", fake)
+
+    assert verify_dns_txt(Target(url="https://app.example.com"), TOKEN).verified
+
+
+def test_dns_verification_without_dnspython_says_so(monkeypatch):
+    import sys
+
+    monkeypatch.setitem(sys.modules, "dns", None)
+    monkeypatch.setitem(sys.modules, "dns.resolver", None)
+    r = verify_dns_txt(Target(url="https://app.example.com"), TOKEN)
+    assert not r.verified
+    assert "dnspython not installed" in r.detail

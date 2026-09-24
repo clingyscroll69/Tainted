@@ -190,7 +190,6 @@ def fix(
             setup=setup,
             replay_after=SupabaseReplay(setup.target) if setup else None,
             answers=answers,
-            llm=llm,
             repo_path=str(repo) if candidate.check is Check.AGENT_INJECTION else None,
         )
     except (ValueError, NotImplementedError) as exc:

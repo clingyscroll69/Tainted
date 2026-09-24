@@ -775,7 +775,7 @@ def api_fix(req: FixRequest, request: Request):
             else None
         )
         try:
-            fix_result = core_fix(Finding(candidate=cand), answers=answers, llm=llm)
+            fix_result = core_fix(Finding(candidate=cand), answers=answers)
         except ValueError:
             # The tool plane refusing to guess. Return the questions, not an error page.
             return _interview_response(cand)

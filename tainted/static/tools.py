@@ -82,8 +82,10 @@ def parse_n8n_export(data: dict, source_file: str) -> list[AgentScope]:
         return []
     tools = [
         ToolSpec(
-            name=n.get("name", n.get("type", "?")),
-            description=n.get("type", ""),
+            # `or`, not a `.get` default: an export can carry `"name": null`, and a default
+            # only fills a missing key, so the null reached the graph as a tool with no name.
+            name=str(n.get("name") or n.get("type") or "?"),
+            description=str(n.get("type") or ""),
             source_file=source_file,
         )
         for n in nodes
@@ -108,7 +110,8 @@ def parse_flowise_export(data: dict, source_file: str) -> list[AgentScope]:
     for n in nodes:
         if not isinstance(n, dict):
             continue
-        node_data = n.get("data") if isinstance(n.get("data"), dict) else {}
+        raw = n.get("data")
+        node_data = raw if isinstance(raw, dict) else {}
         label = node_data.get("label") or node_data.get("name") or n.get("id", "?")
         description = " ".join(
             str(part)

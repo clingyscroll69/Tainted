@@ -118,7 +118,9 @@ def _ip_is_internal(ip) -> bool:
 
 
 def _default_addr_resolver(host: str) -> list[str]:
-    return [info[4][0] for info in socket.getaddrinfo(host, None)]
+    # `sockaddr[0]` is always the address string; the tuple's type is wider only because of
+    # its later members (port, flow info, scope id).
+    return [str(info[4][0]) for info in socket.getaddrinfo(host, None)]
 
 
 class SeedRecord(BaseModel):

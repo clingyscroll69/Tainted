@@ -99,3 +99,11 @@ def test_js_agent_tools_are_recovered_with_descriptions():
 
 def test_js_file_with_no_tool_constructors_yields_nothing():
     assert parse_js_agent("export const x = 1;\n", "x.ts") == []
+
+
+def test_an_n8n_node_with_a_null_name_still_gets_a_name():
+    """A `.get` default fills only a missing key; `"name": null` used to reach the graph."""
+    scopes = parse_n8n_export(
+        {"name": "flow", "nodes": [{"name": None, "type": "n8n-nodes-base.gmail"}]}, "flow.json"
+    )
+    assert scopes[0].tools[0].name == "n8n-nodes-base.gmail"

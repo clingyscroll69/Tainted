@@ -161,7 +161,19 @@ def render_reverification(fix_result) -> None:
         console.print(f"  {mark} {_e(a.name)}: [dim]{_e(a.detail)}[/dim]")
 
     status = fix_result.resulting_status.value
-    if status == "fixed":
+    tool_plane = any(a.name == "hole_did_not_relocate" for a in fix_result.assertions)
+    if status == "fixed" and tool_plane:
+        console.print(
+            "\n[bold green]FIXED[/bold green]. No agent holds both tools any more, and the "
+            "pairing did not move to another one."
+        )
+    elif status == "reported" and tool_plane and fix_result.all_assertions_passed:
+        console.print(
+            "\n[bold yellow]GATED, UNPROVEN[/bold yellow]. The agent keeps both tools and the "
+            "gate covers every sink, on paper. The gate runs in your runtime, which Tainted "
+            "cannot execute, so no attack has shown it holds."
+        )
+    elif status == "fixed":
         console.print("\n[bold green]FIXED[/bold green]. The attack fails now. The owner still has access.")
     elif status == "broke_it_safely":
         console.print(

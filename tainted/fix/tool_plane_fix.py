@@ -76,7 +76,8 @@ def _scope_split(candidate: Candidate) -> tuple[list[FileEdit], str]:
         f"Scope split: `{scope}` becomes two agents, so no single agent can both read and act. "
         f"The application decides when the actor runs, not the reader. What the reader "
         f"produces has to cross a typed boundary. It can never arrive as an instruction. "
-        f"Tainted rechecks the split graph and proves the hole did not just move."
+        f"Tainted rebuilds the graph the split leaves and checks the pairing did not just move "
+        f"to another agent."
     )
     return edits, note
 

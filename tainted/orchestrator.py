@@ -357,8 +357,6 @@ def fix(
     setup: Optional[ProveSetup] = None,
     replay_after: Optional[SupabaseReplay] = None,
     answers: Optional[list[InterviewAnswer]] = None,
-    llm: Optional[LLMClient] = None,
-    driver: Optional[AgentDriver] = None,
     repo_path: Optional[str] = None,
     prober: Optional[RouteProber] = None,
 ) -> FixResult:
@@ -372,15 +370,17 @@ def fix(
         still aimed correctly and simply now fails. Two assertions: the attack fails AND
         legitimate access survives.
       * **User intent about structure** (tool plane): which of four remediations is right isn't
-        in the code. Requires `answers` from the interview. Re-verified by re-analysing and
-        proving *fresh*, because the fix reshapes the graph it was measured on.
+        in the code. Requires `answers` from the interview. Re-verified by rebuilding the agent
+        graph as the fix leaves it and looking for the pairing again, because the fix reshapes
+        the graph it was measured on. `repo_path` widens that search to every agent the
+        repository declares.
       * **User intent about correctness** (test integrity): only the developer knows whether
         current behavior is intended, so this returns the question, never an auto-written test.
     """
     if finding.check in (Check.BOLA, Check.RLS):
         return _fix_request_plane(finding, setup, replay_after, prober)
     if finding.check is Check.AGENT_INJECTION:
-        return _fix_tool_plane(finding, answers, llm, driver, repo_path)
+        return _fix_tool_plane(finding, answers, repo_path)
     if finding.check is Check.TEST_INTEGRITY:
         return _fix_test_integrity(finding)
     if finding.check is Check.CLASSIC_INJECTION:
@@ -412,8 +412,6 @@ def _fix_request_plane(
 def _fix_tool_plane(
     finding: Finding,
     answers: Optional[list[InterviewAnswer]],
-    llm: Optional[LLMClient],
-    driver: Optional[AgentDriver],
     repo_path: Optional[str],
 ) -> FixResult:
     if not answers:
@@ -427,12 +425,9 @@ def _fix_tool_plane(
     result = FixResult(finding=finding, edits=edits, notes=note)
     result.metadata["remediation"] = remediation.value
 
-    if repo_path is not None:
-        reverify_tool_plane(result, repo_path, llm=llm, driver=driver)
-    else:
-        result.notes += (
-            " (patch-only: no repository given, so Tainted did not re-check the changed graph)"
-        )
+    # The graph is re-checked either way. A repository widens the search for a relocated hole
+    # from the agents this fix writes to every agent the repository declares.
+    reverify_tool_plane(result, repo_path)
     return result
 
 

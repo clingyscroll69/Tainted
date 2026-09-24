@@ -316,7 +316,6 @@ def tainted_fix(
         fix_result = core_fix(
             Finding(candidate=cand),
             answers=interview_answers,
-            llm=_llm_or_none(),
             repo_path=repo_path,
         )
     except ValueError as exc:

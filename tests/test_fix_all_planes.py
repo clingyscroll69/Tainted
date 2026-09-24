@@ -32,17 +32,8 @@ from tainted.models import (
     Plane,
     SourceLocation,
 )
-from tests.conftest import FakeLLM
 
 CONFIGS = str(Path(__file__).parent / "fixtures" / "agent_configs")
-
-LABELS = {
-    "read_email": {"role": "source", "severity": "info"},
-    "send_email": {"role": "sink", "severity": "high"},
-    "list_folders": {"role": "neither", "severity": "info"},
-    "fetch_webpage": {"role": "source", "severity": "info"},
-    "run_shell": {"role": "sink", "severity": "critical"},
-}
 
 
 def tool_candidate(scope="email_assistant") -> Candidate:
@@ -143,12 +134,10 @@ def test_reverify_passes_when_the_colocation_is_gone_from_the_graph(tmp_path):
         json.dumps({"name": "email_actor", "tools": [{"name": "send_email"}]})
     )
 
-    result = reverify_tool_plane(
-        _fix_result(), str(tmp_path), llm=FakeLLM(label_map=LABELS)
-    )
+    result = reverify_tool_plane(_fix_result(), str(tmp_path))
     assert result.resulting_status is FindingStatus.FIXED
     names = {a.name: a.passed for a in result.assertions}
-    assert names["fresh_attack_fails"] is True
+    assert names["pairing_gone"] is True
     assert names["hole_did_not_relocate"] is True
 
 
@@ -167,23 +156,84 @@ def test_reverify_catches_a_split_that_relocated_the_hole(tmp_path):
         )
     )
 
-    result = reverify_tool_plane(
-        _fix_result(), str(tmp_path), llm=FakeLLM(label_map=LABELS)
-    )
+    result = reverify_tool_plane(_fix_result(), str(tmp_path))
     relocated = [a for a in result.assertions if a.name == "hole_did_not_relocate"][0]
     assert relocated.passed is False
     assert "email_helper" in relocated.detail
     assert result.resulting_status is not FindingStatus.FIXED
 
 
-def test_reverify_without_a_model_reports_unverified_rather_than_fixed(tmp_path):
-    """Unproven and proven-safe are different claims; only one of them is honest here."""
-    (tmp_path / "reader.json").write_text(json.dumps({"name": "x", "tools": [{"name": "a"}]}))
+def _answered(needs_both="no", human="yes", latency="yes"):
+    return [
+        InterviewAnswer(key="needs_both", choice=needs_both),
+        InterviewAnswer(key="human_available", choice=human),
+        InterviewAnswer(key="latency_ok", choice=latency),
+    ]
 
-    result = reverify_tool_plane(_fix_result(), str(tmp_path), llm=None)
+
+def test_the_graph_is_rechecked_before_the_fix_is_applied(tmp_path):
+    """The fix writes new files the developer has not applied. Re-reading the repository would
+    re-find the unfixed agent; the re-check has to build the graph the edits leave instead."""
+    (tmp_path / "email_assistant.mcp.json").write_text(
+        json.dumps(
+            {"name": "email_assistant", "tools": [{"name": "read_email"}, {"name": "send_email"}]}
+        )
+    )
+    result = core_fix(
+        Finding(candidate=tool_candidate()), answers=_answered(), repo_path=str(tmp_path)
+    )
+    assert result.resulting_status is FindingStatus.FIXED
+    assert all(a.passed for a in result.assertions)
+    assert "any agent in the repository" in result.assertions[-1].detail
+
+
+def test_the_recheck_needs_no_model_and_no_repository():
+    """Analysis already labelled these tools, so the website and the demo re-check too."""
+    result = core_fix(Finding(candidate=tool_candidate()), answers=_answered())
+    assert result.resulting_status is FindingStatus.FIXED
+    assert "no repository was given" in result.assertions[-1].detail
+    assert "did not re-check" not in result.notes
+
+
+def test_a_gate_that_keeps_the_pairing_is_reported_not_fixed():
+    """Complete on paper is not proven in execution: the sandbox cannot run your gate."""
+    result = core_fix(
+        Finding(candidate=tool_candidate()), answers=_answered(needs_both="yes", human="yes")
+    )
+    names = {a.name: a.passed for a in result.assertions}
+    assert names == {"gate_covers_every_sink": True, "hole_did_not_relocate": True}
     assert result.resulting_status is FindingStatus.REPORTED
-    assert result.assertions[0].passed is False
-    assert "unverified" in result.assertions[0].detail
+
+
+def test_a_gate_that_misses_a_sink_fails():
+    candidate = tool_candidate()
+    fix = FixResult(
+        finding=Finding(candidate=candidate.model_copy(update={"sink": "send_email, run_shell"})),
+        metadata={"remediation": ToolRemediation.MEDIATION.value},
+    )
+    fix.edits, _ = generate_tool_plane_fix(candidate, ToolRemediation.MEDIATION)
+    result = reverify_tool_plane(fix)
+    gate = [a for a in result.assertions if a.name == "gate_covers_every_sink"][0]
+    assert gate.passed is False
+    assert "run_shell" in gate.detail
+    assert result.resulting_status is not FindingStatus.FIXED
+
+
+def test_a_split_that_hands_both_tools_to_one_new_agent_is_caught():
+    """The split's own edits are in the graph, so a bad split cannot hide in them."""
+    candidate = tool_candidate()
+    fix = FixResult(
+        finding=Finding(candidate=candidate),
+        metadata={"remediation": ToolRemediation.SCOPE_SPLIT.value},
+    )
+    fix.edits, _ = generate_tool_plane_fix(candidate, ToolRemediation.SCOPE_SPLIT)
+    fix.edits[1].replacement = json.dumps(
+        {"name": "email_actor", "tools": [{"name": "read_email"}, {"name": "send_email"}]}
+    )
+    result = reverify_tool_plane(fix)
+    relocated = [a for a in result.assertions if a.name == "hole_did_not_relocate"][0]
+    assert relocated.passed is False
+    assert "email_actor" in relocated.detail
 
 
 # --------------------------------------------------------------------------- #

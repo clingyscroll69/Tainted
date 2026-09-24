@@ -16,7 +16,7 @@ from typing import Optional
 import httpx
 
 from tainted.dynamic.replay import SupabaseReplay
-from tainted.dynamic.target import ProveSetup
+from tainted.dynamic.target import ProveSetup, SeedRecord
 from tainted.models import (
     Candidate,
     Exploit,
@@ -73,7 +73,7 @@ def prove_candidate(
 
         # ---- Targeted BOLA (surgical, first) ---- #
         if setup.seed is not None and setup.seed.table == table:
-            result = _targeted_bola(setup, replay, table)
+            result = _targeted_bola(setup, setup.seed, replay, table)
             if result.succeeded:
                 return _proven(finding, result)
             # Fall through to the blunt probe if the surgical one didn't fire.
@@ -93,8 +93,11 @@ def prove_candidate(
     return finding
 
 
-def _targeted_bola(setup: ProveSetup, replay: SupabaseReplay, table: str) -> ProbeResult:
-    seed = setup.seed
+def _targeted_bola(
+    setup: ProveSetup, seed: SeedRecord, replay: SupabaseReplay, table: str
+) -> ProbeResult:
+    # The seed is a parameter rather than read from `setup` so the caller's `is not None`
+    # guard is the type the function receives, not a fact it has to trust.
     resp = replay.select_by_id(
         setup.account_b, table, seed.id, id_column=seed.id_column
     )
