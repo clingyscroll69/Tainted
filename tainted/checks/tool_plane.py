@@ -81,11 +81,19 @@ def colocated_scopes(scopes: list[AgentScope]) -> list[AgentScope]:
 # Candidates (ranked filter)
 # --------------------------------------------------------------------------- #
 def _scope_candidate(scope: AgentScope) -> Candidate:
+    from tainted.trifecta import assess
+
     worst_sink = max(
         scope.sinks,
         key=lambda t: _SEVERITY.get((t.severity or "medium"), Severity.MEDIUM).rank,
     )
     severity = _SEVERITY.get((worst_sink.severity or "medium"), Severity.MEDIUM)
+    # The lethal trifecta's third leg: a scope that can also send data outward is strictly more
+    # dangerous, because an injection here can exfiltrate rather than merely misfire. This is a
+    # severity nudge and a metadata flag, never a membership change — proof still decides.
+    verdict = assess(scope)
+    if verdict.complete and severity.rank < Severity.HIGH.rank:
+        severity = Severity.HIGH
     return Candidate(
         check=Check.AGENT_INJECTION,
         plane=Plane.TOOL,
@@ -110,6 +118,9 @@ def _scope_candidate(scope: AgentScope) -> Candidate:
             "kind": scope.kind,
             "coded": scope.coded,
             "worst_sink": worst_sink.name,
+            "can_exfiltrate": verdict.can_exfiltrate,
+            "trifecta_complete": verdict.complete,
+            "egress_tools": list(verdict.egress_tools),
         },
     )
 

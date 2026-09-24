@@ -75,6 +75,36 @@ class SupabaseReplay:
             headers=self._auth_headers(account),
         )
 
+    def count_reachable(self, account: Account, table: str) -> tuple[bool, int | None, str]:
+        """How many rows of `table` this account can reach — counted, never pulled.
+
+        PostgREST answers `Prefer: count=exact` with a `Content-Range` of `0-N/TOTAL`, so the
+        total arrives in a header while `limit=1` keeps the body to a single row. That split is
+        the whole point: the number a reader needs is the size of the exposure, and pulling a
+        table to learn it would make the measurement itself the breach it is describing.
+
+        Returns `(counted, total, detail)`. `counted` is False when the server did not answer
+        with a usable count — in which case `total` is None and stays None. An un-counted read
+        must never be rendered as zero exposure.
+        """
+        try:
+            resp = self._client.get(
+                f"{self.target.rest_base}/rest/v1/{table}",
+                params={"select": "*", "limit": "1"},
+                headers={**self._auth_headers(account), "Prefer": "count=exact"},
+            )
+        except httpx.HTTPError as exc:
+            return False, None, f"the count request failed: {exc}"
+        if resp.status_code not in (200, 206):
+            return False, None, f"the server answered {resp.status_code} to the count request"
+        total = _total_from_content_range(resp.headers.get("Content-Range", ""))
+        if total is None:
+            return False, None, (
+                "the server returned no usable Content-Range, so the number of reachable rows "
+                "is unknown — it is not zero, it is uncounted"
+            )
+        return True, total, f"counted {total} reachable row(s) in `{table}`"
+
     # ------------------------------------------------------------------ #
     # Headers
     # ------------------------------------------------------------------ #
@@ -105,3 +135,16 @@ class SupabaseReplay:
 
     def close(self) -> None:
         self._client.close()
+
+
+def _total_from_content_range(value: str) -> "int | None":
+    """Read the total out of a PostgREST `Content-Range` header (`0-4/1240` -> 1240).
+
+    A `*` total means the server declined to count; that is unknown, never zero.
+    """
+    if "/" not in value:
+        return None
+    total = value.rsplit("/", 1)[-1].strip()
+    if not total.isdigit():
+        return None
+    return int(total)

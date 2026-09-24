@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Callable, Optional, Sequence
 
 from tainted.applicability import BehavioralProbe, decide_plane
+from tainted.budget import Budget
 from tainted.checks.classic_injection import scan_classic_injection
 from tainted.checks.request_plane import analyze_request_plane
 from tainted.checks.test_integrity import CommandRunner, measure_test_integrity
@@ -134,6 +135,14 @@ def analyze(
                     ),
                 )
             )
+    # Cross-tenant tool access is a separate question from injection and is deliberately not
+    # gated on the model: a lookup tool that trusts its identifier is a structural shape, visible
+    # in the manifest, and making it depend on a key would mean a run without one silently
+    # dropped it rather than reporting it.
+    if tool_decision.applies and Check.TOOL_TENANCY in active:
+        from tainted.checks.tool_tenancy import analyze_tool_tenancy
+
+        candidates.extend(analyze_tool_tenancy(discover_scopes(repo_path, exclude=exclude)))
 
     # Test integrity — a codebase-level measurement, not a plane, so no applicability gate.
     # It is opt-in by cost, not by relevance: a mutation campaign is minutes, not milliseconds.
@@ -178,6 +187,7 @@ def prove(
     prober: Optional[RouteProber] = None,
     autodiscover: bool = False,
     on_finding: Optional[Callable[[Finding], None]] = None,
+    budget: Optional["Budget"] = None,
 ) -> list[Finding]:
     """Fire live probes at the running target for each candidate, in ranked order.
 
@@ -219,7 +229,17 @@ def prove(
 
     # Ranked order: structural holes first, then model rank, then severity. Everything is
     # tried — the ordering only decides who goes first.
+    if budget is not None:
+        budget.start()
     for candidate in analysis.ranked():
+        # A budget is checked *between* candidates, never during one: a half-fired probe proves
+        # nothing. When it is spent the loop stops and returns everything proven so far — the
+        # graceful stop. The caller reads `budget.attempted` to report how many were skipped, so
+        # a capped run can never be mistaken for a complete one with no findings.
+        if budget is not None and budget.exhausted() is not None:
+            break
+        if budget is not None:
+            budget.note_attempt()
         finding: Optional[Finding] = None
         if candidate.check in (Check.BOLA, Check.RLS):
             finding = _prove_request_plane(candidate, setup, replay, prober)
@@ -229,6 +249,25 @@ def prove(
             if scopes is None:
                 scopes = _discover_labelled_scopes(analysis.repo_path, llm)
             finding = _prove_tool_plane(candidate, scopes, llm, driver)
+        elif candidate.check is Check.TOOL_TENANCY:
+            # Needs a live backend and two tenant credentials. Neither is inferable from the
+            # repository, so without them this stays REPORTED with the reason attached rather
+            # than quietly vanishing from the run.
+            from tainted.models import ProbeResult as _PR
+
+            finding = Finding(
+                candidate=candidate,
+                status=FindingStatus.REPORTED,
+                proof=_PR(
+                    succeeded=False,
+                    kind="tool_tenancy",
+                    notes=(
+                        "Reported from the tool graph only. Proving it needs two tenant "
+                        "credentials and a reachable backend — call "
+                        "`tainted.checks.tool_tenancy.prove_tool_tenancy` with both."
+                    ),
+                ),
+            )
         elif candidate.check is Check.TEST_INTEGRITY:
             # The surviving mutant *is* the proof; there is no dynamic step to run.
             finding = Finding(

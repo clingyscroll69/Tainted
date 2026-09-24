@@ -65,6 +65,31 @@ inputs:
       `github-token` with `contents: write` and `pull-requests: write`.
     required: false
     default: ""
+  invariants:
+    description: >-
+      Rules this app must never break, in plain English, one per line (or pipe-separated). Each is
+      turned into a real request and fired. A violated rule fails the job; a rule that could not be
+      tested is reported as not-tested and never as passing. Needs `target-url` and `login-b`.
+    required: false
+    default: ""
+  lockout:
+    description: >-
+      "true" to check that this change did not lock the OWNER out of their own data. Fails the job
+      if it did — secure and broken is still broken. Needs `target-url`, `login-a` and `seed`.
+    required: false
+    default: ""
+  receipt:
+    description: >-
+      Path to write a signed receipt of the run: what fired, what worked, and what was never
+      tried. The untested surface is inside the signed payload, so it cannot be stripped from a
+      document that still verifies.
+    required: false
+    default: ""
+  receipt-secret:
+    description: >-
+      Signing key for the receipt. Without it the receipt is written unsigned and says so.
+    required: false
+    default: ""
   github-token:
     description: >-
       Token used to push the fix branch and open the pull request. Only read when `fix` is on;
@@ -89,6 +114,10 @@ runs:
     GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
     GITHUB_REPOSITORY: ${{ github.repository }}
     TAINTED_FIX: ${{ inputs.fix }}
+    TAINTED_INVARIANTS: ${{ inputs.invariants }}
+    TAINTED_LOCKOUT: ${{ inputs.lockout }}
+    TAINTED_RECEIPT: ${{ inputs.receipt }}
+    TAINTED_RECEIPT_SECRET: ${{ inputs.receipt-secret }}
     # `gh pr create` and the `git push` before it both read GH_TOKEN. Passed through here so the
     # auto-fix PR is reachable from the action at all — it was documented, tutorialised, and
     # wired to nothing.

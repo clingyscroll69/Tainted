@@ -26,6 +26,7 @@ catch nobody asked for.
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 
 from tainted import analyze as core_analyze
@@ -35,7 +36,13 @@ from tainted.llm.gemini import get_default_client
 from tainted.models import Check, FindingStatus, Severity
 from tainted.report import build_report
 from tainted_ci.oidc import verify_ci_ownership
-from tainted_ci.render import render_markdown, render_next_steps, render_tutorial
+from tainted_ci.render import (
+    render_invariants,
+    render_lockout,
+    render_markdown,
+    render_next_steps,
+    render_tutorial,
+)
 
 
 def _llm_or_none():
@@ -85,6 +92,25 @@ def _setup_from_env() -> ProveSetup | None:
     )
 
 
+def _changed_files(repo: str, base_ref: str) -> set[str]:
+    """Files changed against a base ref, via `git diff --name-only`. Empty set on any failure.
+
+    Diff-awareness is opt-in and fails open: if git is unavailable or the base ref cannot be
+    resolved, the scan stays whole-repo rather than silently narrowing to nothing, because a
+    scan that quietly covered no files is the exact false all-clear this tool exists to avoid.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "-C", repo, "diff", "--name-only", f"{base_ref}...HEAD"],
+            capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    if proc.returncode != 0:
+        return set()
+    return {line.strip() for line in proc.stdout.splitlines() if line.strip()}
+
+
 def run() -> int:
     # A pipeline that is not configured yet has nothing to scan worth reading. Let it ask
     # for the walkthrough instead, from inside the same container the job already runs.
@@ -119,6 +145,19 @@ def run() -> int:
     result = core_analyze(
         repo, llm=llm, target=setup.target if setup else None, only=only, skip=skip
     )
+
+    # Diff-awareness (opt-in). With TAINTED_DIFF_ONLY set and a base ref available, keep only the
+    # candidates whose file the PR actually touched — so the gate speaks to this change, not the
+    # whole repository's history. Fails open: an unresolvable diff leaves every candidate in.
+    if os.environ.get("TAINTED_DIFF_ONLY", "").lower() in ("1", "true", "yes"):
+        base_ref = os.environ.get("TAINTED_DIFF_BASE") or os.environ.get("GITHUB_BASE_REF", "")
+        if base_ref:
+            changed = _changed_files(repo, base_ref)
+            if changed:
+                result.candidates = [
+                    c for c in result.candidates if c.location.file in changed
+                ]
+
     findings = []
 
     prove_note = "prove skipped: no TAINTED_TARGET_URL"
@@ -142,7 +181,72 @@ def run() -> int:
         fix_note = _open_fix_pr(repo, findings, setup)
 
     report = build_report(result, findings)
+
+    # SARIF for the Security tab, when asked. Proof strength rides on each result's level and the
+    # silence ledger rides on the run's properties, so an empty results array is never read as
+    # full coverage.
+    sarif_path = os.environ.get("TAINTED_SARIF", "").strip()
+    if sarif_path:
+        from tainted.report.sarif import to_sarif_json
+
+        try:
+            with open(sarif_path, "w", encoding="utf-8") as fh:
+                fh.write(to_sarif_json(report))
+            print(f"::notice::Tainted wrote SARIF to {sarif_path}")
+        except OSError as exc:
+            print(f"::warning::could not write SARIF to {sarif_path}: {exc}")
+
+    # A signed receipt for this run, when asked. The untested surface sits inside the signed
+    # payload, so a downstream consumer cannot publish the findings with the admissions removed
+    # and still have it verify.
+    receipt_path = os.environ.get("TAINTED_RECEIPT", "").strip()
+    if receipt_path:
+        import json as _json
+
+        from tainted.receipt import build_receipt, sign as _sign_receipt
+
+        secret = os.environ.get("TAINTED_RECEIPT_SECRET", "")
+        rec = build_receipt(report)
+        signature = _sign_receipt(rec, secret.encode("utf-8")) if secret else None
+        try:
+            with open(receipt_path, "w", encoding="utf-8") as fh:
+                fh.write(_json.dumps(rec.as_dict(signature), indent=2))
+            if signature is None:
+                print(
+                    f"::warning::Tainted wrote an UNSIGNED receipt to {receipt_path} (set "
+                    f"TAINTED_RECEIPT_SECRET to sign it). It is a report, not an attestation."
+                )
+            else:
+                print(f"::notice::Tainted wrote a signed receipt to {receipt_path}")
+        except OSError as exc:
+            print(f"::warning::could not write the receipt to {receipt_path}: {exc}")
+
+    # Rules the repository states about itself, in plain English, fired at the running app. Only
+    # when there is a target to fire at — a rule nobody tested comes back not-tested, never held.
+    invariant_report = None
+    rules_raw = os.environ.get("TAINTED_INVARIANTS", "").strip()
+    if rules_raw and setup is not None:
+        from tainted.invariants import check_invariants
+
+        rules = [r.strip() for r in rules_raw.replace("|", chr(10)).split(chr(10)) if r.strip()]
+        if rules:
+            invariant_report = check_invariants(
+                rules, repo, setup, llm=llm, ownership_verified=True
+            )
+
+    # Did this change lock the owner out of their own data? Asked only when a seed record makes
+    # the answer meaningful.
+    lockout_result = None
+    if os.environ.get("TAINTED_LOCKOUT", "").lower() in ("1", "true", "yes") and setup is not None:
+        from tainted import lockout_check
+
+        lockout_result = lockout_check(setup, ownership_verified=True)
+
     markdown = render_markdown(report, prove_note)
+    if invariant_report is not None:
+        markdown += chr(10) * 2 + render_invariants(invariant_report) + chr(10)
+    if lockout_result is not None:
+        markdown += chr(10) * 2 + render_lockout(lockout_result) + chr(10)
     if fix_note:
         markdown += f"\n\n{fix_note}\n"
     # Say what this run could not reach, and what to set to reach it. A summary with no
@@ -157,6 +261,22 @@ def run() -> int:
     ]
     if blocking:
         print(f"::error::Tainted proved {len(blocking)} finding(s) at/above {fail_on.value}.")
+        return 1
+    # A rule the repository declared about itself, broken by a fired request, is as much a gate as
+    # a proven finding — it IS a proven finding, aimed by a sentence instead of by a scan.
+    if invariant_report is not None and invariant_report.violated:
+        print(
+            f"::error::Tainted broke {len(invariant_report.violated)} stated rule(s) with a real "
+            f"request."
+        )
+        return 1
+    # Locking the owner out fails the build too: a change that secures the data by making it
+    # unreachable has not shipped a working feature.
+    if lockout_result is not None and lockout_result.locked_out:
+        print(
+            f"::error::Tainted found {len(lockout_result.locked_out)} resource(s) the owner can "
+            f"no longer reach. Secure and broken are not the same result."
+        )
         return 1
     # If nothing was proved but static candidates are severe, still gate (analyze-only PRs).
     if not findings:

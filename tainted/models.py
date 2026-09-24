@@ -33,6 +33,7 @@ class Check(str, Enum):
     AGENT_INJECTION = "agent_injection"  # confused-deputy prompt injection (tool plane)
     CLASSIC_INJECTION = "classic_injection"  # SQL / command / template injection
     TEST_INTEGRITY = "test_integrity"  # mutation-tested safety net
+    TOOL_TENANCY = "tool_tenancy"  # cross-tenant object access through a shared tool backend
 
 
 CHECK_PLANE: dict[Check, Optional[Plane]] = {
@@ -41,6 +42,7 @@ CHECK_PLANE: dict[Check, Optional[Plane]] = {
     Check.AGENT_INJECTION: Plane.TOOL,
     Check.CLASSIC_INJECTION: Plane.REQUEST,
     Check.TEST_INTEGRITY: None,  # a codebase-level measurement, not a plane
+    Check.TOOL_TENANCY: Plane.TOOL,
 }
 
 

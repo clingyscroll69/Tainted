@@ -9,6 +9,8 @@ import typer
 
 from tainted import analyze as core_analyze
 from tainted import fix as core_fix
+from tainted import lockout_check as core_lockout
+from tainted.invariants import check_invariants as core_invariants
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target  # noqa: F401
 from tainted.fix.paths import edit_target
 from tainted.llm.gemini import get_default_client
@@ -87,9 +89,18 @@ def prove(
             "stays as is."
         ),
     ),
+    max_minutes: Optional[float] = typer.Option(
+        None, help="Stop after this many minutes, keeping every hole proven so far."
+    ),
+    max_candidates: Optional[int] = typer.Option(
+        None, help="Stop after attempting this many candidates."
+    ),
 ):
     """Run real attacks against the running app, inside a Docker sandbox. Localhost only."""
+    from tainted.budget import parse_budget
+
     setup = _build_setup(url, login_a, login_b, seed, anon_key)
+    budget = parse_budget(max_minutes, max_candidates)
 
     # Localhost only, and derived rather than asserted. There is no token path to reach: the
     # CLI points at an app you are running, so if the target is not local the honest answer is
@@ -114,6 +125,7 @@ def prove(
             setup,
             ownership_verified=True,  # derived above: the target is genuinely local
             autodiscover=autodiscover,
+            budget=budget,
         )
     except SandboxUnavailable as exc:
         console.print(f"[red]{_e(exc)}[/red]")
@@ -124,6 +136,8 @@ def prove(
 
     report = outcome.report
     render_report(report)
+    if outcome.budget and outcome.budget.get("stopped_early"):
+        console.print(f"[yellow]{_e(outcome.budget['note'])}[/yellow]")
     findings = report.findings
     if any(
         f.status == FindingStatus.PROVEN and f.severity.rank >= Severity.HIGH.rank
@@ -282,6 +296,154 @@ def tutorial(
         f"No tutorial topic '{topic}'. Choose from: "
         + ", ".join(lesson["topic"] for lesson in LESSONS)
     )
+
+
+@app.command()
+def sarif(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    only: Optional[str] = typer.Option(None, help="Run only these checks (comma-separated)"),
+    skip: Optional[str] = typer.Option(None, help="Skip these checks (comma-separated)"),
+):
+    """Emit the analysis as SARIF 2.1.0, with proof strength and the silence ledger.
+
+    Prints to stdout so you can redirect it into your CI's Security tab. Proof strength rides on
+    each result's level (proven = error), and everything the run did not test rides on the run's
+    properties, so an empty results array is never mistaken for full coverage.
+    """
+    from tainted.report.sarif import to_sarif_json
+
+    result = core_analyze(
+        str(repo), llm=_llm_or_none(), only=_parse_checks(only), skip=_parse_checks(skip)
+    )
+    typer.echo(to_sarif_json(build_report(result)))
+
+
+@app.command(name="mutate-security")
+def mutate_security(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    test_cmd: Optional[str] = typer.Option(
+        None, help="Command to run the suite, e.g. 'pytest -q'. Without it, mutants are listed but not run."
+    ),
+):
+    """Remove each authorization check and report the ones no test catches.
+
+    Only surviving security mutants are shown — a line whose ownership predicate could vanish and
+    your suite would stay green. Without a --test-cmd the checks are found but not run, and none is
+    claimed killed, in keeping with the rule that an un-run check never reads as a passed one.
+    """
+    from tainted.checks.security_mutation import run_security_mutation
+
+    cmd = test_cmd.split() if test_cmd else None
+    result = run_security_mutation(str(repo), test_cmd=cmd)
+    console.print(f"[bold]{_e(result.note)}[/bold]")
+    for m in result.survived:
+        console.print(
+            f"  [yellow]survived[/yellow] {_e(m.file)}:{m.line} "
+            f"[{_e(m.operator.name)}]  {_e(m.original)}"
+        )
+    if result.ran and result.survived:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def ledger(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    url: Optional[str] = typer.Option(None, help="Base URL, to enable the behavioral probe rung"),
+):
+    """Show what Tainted did NOT test, and why — the silence ledger as a first-class artifact."""
+    from tainted.report.enrich import silence_ledger
+
+    target = Target(url=url) if url else None
+    result = core_analyze(str(repo), llm=_llm_or_none(), target=target)
+    led = silence_ledger(build_report(result))
+    console.print(f"[bold]{_e(led['headline'])}[/bold]\n")
+    for row in led["skipped_planes"]:
+        console.print(f"  [dim]plane cleared as absent:[/dim] {_e(row['plane'])} — {_e(row['evidence'])}")
+    for row in led["not_proved"]:
+        console.print(f"  [yellow]not fully proven:[/yellow] {_e(row['check'])} — {_e(row['detail'])}")
+    console.print(f"\n[dim]{_e(led['reminder'])}[/dim]")
+
+
+@app.command()
+def lockout(
+    url: str = typer.Option(..., help="Base URL of the running app"),
+    login_a: str = typer.Option(..., "--login-a", help="email:password for the owner"),
+    seed: str = typer.Option(..., help="table:id of a record the owner owns"),
+    route: Optional[str] = typer.Option(None, help="The route that serves it, e.g. /api/invoices/[id]"),
+    anon_key: Optional[str] = typer.Option(None, help="Supabase anon key, if the app uses one"),
+):
+    """Check whether your security locked out your own users.
+
+    The opposite failure from a vulnerability, and the one nothing else reports. A policy that
+    blocks the attack and also blocks the owner is secure and broken, and this asks that question
+    on its own — no finding required, any time you like.
+    """
+    setup = _build_setup(url, login_a, login_a, seed, anon_key)
+    if route and setup.seed:
+        setup.seed.route_path = route
+    result = core_lockout(setup)
+
+    if not result.checked:
+        console.print("[yellow]Nothing was tested.[/yellow] This is not a pass.")
+        for row in result.undecided:
+            console.print(f"  [dim]{_e(row['resource'])}:[/dim] {_e(row['reason'])}")
+        raise typer.Exit(code=2)
+
+    for c in result.checked:
+        tag = "[red]locked out[/red]" if c.owner_locked_out else "[green]reachable[/green]"
+        console.print(f"  {tag} {_e(c.resource)} [dim]via {_e(c.via)}[/dim] — {_e(c.detail)}")
+    console.print(f"\n[bold]{_e(result.as_dict()['detail'])}[/bold]")
+    if result.locked_out:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def invariants(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    rule: list[str] = typer.Option(..., "--rule", help="A rule in plain English. Repeatable."),
+    url: str = typer.Option(..., help="Base URL of the running app"),
+    login_b: str = typer.Option(..., "--login-b", help="email:password for the attacking account"),
+    seed: Optional[str] = typer.Option(None, help="table:id of a record to aim at"),
+    anon_key: Optional[str] = typer.Option(None, help="Supabase anon key, if the app uses one"),
+):
+    """Test rules you write in plain English against the running app.
+
+    Each rule comes back violated, held, or NOT TESTED — and the third one is the point. A rule
+    Tainted could not build an attack for is not a rule that held, so it is never reported as one.
+    """
+    setup = _build_setup(url, login_b, login_b, seed, anon_key)
+    report = core_invariants(list(rule), str(repo), setup, llm=_llm_or_none())
+
+    for r in report.results:
+        colour = {"violated": "red", "held": "green", "not_tested": "yellow"}[r.verdict.value]
+        console.print(f"  [{colour}]{_e(r.verdict.value)}[/{colour}] {_e(r.rule)}")
+        console.print(f"    [dim]{_e(r.detail)}[/dim]")
+    console.print(f"\n[bold]{_e(report.as_dict()['headline'])}[/bold]")
+    console.print(f"[dim]{_e(report.as_dict()['reminder'])}[/dim]")
+    if report.violated:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def receipt(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    secret: Optional[str] = typer.Option(
+        None, envvar="TAINTED_RECEIPT_SECRET", help="Signing key. Without one the receipt is unsigned."
+    ),
+):
+    """Emit a signed receipt: what was fired, what worked, and what was never tried.
+
+    The signature covers the untested surface as well as the findings, so the admissions cannot be
+    deleted from a document that still verifies. Prints JSON to stdout.
+    """
+    import json as _json
+
+    from tainted.receipt import build_receipt, sign as _sign
+
+    result = core_analyze(str(repo), llm=_llm_or_none())
+    rec = build_receipt(build_report(result))
+    signature = _sign(rec, secret.encode("utf-8")) if secret else None
+    typer.echo(_json.dumps(rec.as_dict(signature), indent=2))
 
 
 @app.command()

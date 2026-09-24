@@ -28,6 +28,11 @@ class RunRequest(BaseModel):
     # whatever the caller logged the request into.
     plan: Optional[dict[str, Any]] = None
     plan_signature: Optional[str] = None
+    # An optional budget cap on the run. Both None means no cap. The container rebuilds a Budget
+    # from these and reports, in the terminal event, how much the cap left unreached — so a
+    # capped run crossing back looks different from a complete one, which is the whole point.
+    max_seconds: Optional[float] = None
+    max_candidates: Optional[int] = None
     # Whether the host that spawned this container had a usable LLM client. The container has
     # no way to see the host's own environment or config beyond what crossed with it, so this
     # is what lets it tell "no LLM configured anywhere" apart from "the key didn't cross the

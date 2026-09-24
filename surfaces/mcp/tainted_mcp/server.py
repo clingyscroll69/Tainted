@@ -95,7 +95,26 @@ def tainted_analyze(
     result = core_analyze(
         repo_path, llm=_llm_or_none(), only=wanted, skip=unwanted, exclude=exclude_patterns
     )
-    report = build_report(result).model_dump(mode="json")
+    from tainted.report.enrich import prioritized, silence_ledger, standards
+    from tainted.report import build_report as _br
+
+    built = _br(result)
+    report = built.model_dump(mode="json")
+    # The three projections that make the report usable without re-deriving them agent-side: one
+    # priority number per row, the standard ids tiered proven vs static, and the silence ledger
+    # so the agent never reports an empty list as clean.
+    report["prioritized"] = prioritized(built)
+    report["standards"] = standards(built)
+    report["silence_ledger"] = silence_ledger(built)
+    # Accepted-risk memories from `.tainted/memories.json`, applied to the static candidates. A
+    # memory can quiet a candidate here; it can never suppress a fired exploit (that rule lives in
+    # `reconcile_findings`, applied after prove).
+    from tainted.memories import MemoryStore, suppressed_candidates
+
+    store = MemoryStore.load(repo_path)
+    if store.memories:
+        _, applied = suppressed_candidates(list(result.candidates), store)
+        report["suppressions"] = [s.as_dict() for s in applied]
     if exclude_patterns:
         report["excluded"] = exclude_patterns
     return report
@@ -249,7 +268,18 @@ def tainted_prove_result(job_id: str) -> dict:
         return {"error": "unknown job_id"}
     if job.status == "running":
         return {"status": "running"}
-    return {"status": job.status, "report": job.report, "error": job.error}
+    result = {"status": job.status, "report": job.report, "error": job.error}
+    # A curl line and a standalone replay script per proven finding, so the agent can hand the
+    # developer something that survives a re-run without Tainted installed.
+    if job.report:
+        try:
+            from tainted.report import Report
+            from tainted.report.enrich import reproducers
+
+            result["reproducers"] = reproducers(Report.model_validate(job.report))
+        except Exception:  # noqa: BLE001 - a reproducer failure must not break result delivery
+            pass
+    return result
 
 
 def _run_prove(job_id: str, repo_path: str, setup: ProveSetup) -> None:
@@ -268,6 +298,10 @@ def _run_prove(job_id: str, repo_path: str, setup: ProveSetup) -> None:
             run_key=job.run_key,
         )
         job.report = outcome.report.model_dump(mode="json")
+        if outcome.budget is not None:
+            # A capped run's honesty rule has to reach the caller: fold the budget outcome into
+            # the report so "everything proven so far, and how much was not reached" survives.
+            job.report["budget"] = outcome.budget
         job.blocked_calls = outcome.blocked_calls
         job.status = "done"
     except PlanViolation as exc:
@@ -370,6 +404,180 @@ def tainted_fix_interview(
 # --------------------------------------------------------------------------- #
 # tutorial — how to drive this server correctly, read by the calling agent
 # --------------------------------------------------------------------------- #
+@server.tool(
+    description=(
+        "Read-only. The silence ledger for a repository: what the analysis did NOT test and "
+        "why — planes cleared as absent, checks not fully proven, scopes the model filtered "
+        "out. Use it before telling anyone a repo looks clean: an empty findings list is the "
+        "set of holes Tainted both looked for and could fire at, not a clean bill of health."
+    )
+)
+def tainted_ledger(repo_path: str, exclude: str = "") -> dict:
+    from tainted.report.enrich import silence_ledger
+
+    patterns = [p.strip() for p in exclude.split(",") if p.strip()]
+    result = core_analyze(repo_path, llm=_llm_or_none(), exclude=patterns)
+    return silence_ledger(build_report(result))
+
+
+@server.tool(
+    description=(
+        "Read-only. The analysis as SARIF 2.1.0, with proof strength on each result's level "
+        "(proven = error) and the silence ledger on the run's properties. Hand this to a CI "
+        "that ingests SARIF."
+    )
+)
+def tainted_sarif(repo_path: str, exclude: str = "") -> dict:
+    from tainted.report.sarif import to_sarif
+
+    patterns = [p.strip() for p in exclude.split(",") if p.strip()]
+    result = core_analyze(repo_path, llm=_llm_or_none(), exclude=patterns)
+    return to_sarif(build_report(result))
+
+
+@server.tool(
+    description=(
+        "Read-only. Remove each authorization check in the repo and report the ones no test "
+        "catches — a line whose ownership predicate could vanish while the suite stays green. "
+        "This does NOT run the repo's suite from here (that would execute the repo's code); it "
+        "lists the removable checks and, when a test_cmd is given to the CLI, which survive. "
+        "Reported as unassessed here unless you run them yourself."
+    )
+)
+def tainted_mutate_security(repo_path: str, exclude: str = "") -> dict:
+    from tainted.checks.security_mutation import run_security_mutation
+
+    patterns = [p.strip() for p in exclude.split(",") if p.strip()]
+    return run_security_mutation(repo_path, exclude=patterns).as_dict()
+
+
+@server.tool(
+    description=(
+        "Check whether an authorization policy locked out the LEGITIMATE owner — the opposite "
+        "failure from a vulnerability, and one no scanner reports. Run it after any change to "
+        "authorization, RLS, or a fix somebody else wrote. Localhost only. Needs the OWNER's "
+        "login and a record they own; ask the developer for both, never invent them. A result "
+        "with nothing checked is NOT a pass — read `undecided` and say so."
+    )
+)
+def tainted_lockout(
+    url: str, login_a: str = "", seed: str = "", route: str = "", anon_key: str = ""
+) -> dict:
+    from tainted import lockout_check
+
+    if not login_a.strip():
+        return {
+            "action_required": "ask_user",
+            "needs_credentials": ["login_a"],
+            "message": (
+                "This check signs in as the owner to confirm they can still reach their own "
+                "data. Ask the developer for that account as 'email:password'."
+            ),
+        }
+    setup = _build_setup(url, login_a, login_a, seed, anon_key)
+    if not setup.target.is_local:
+        return {"error": f"{setup.target.url} is not local — refusing.", "ok": False}
+    if route.strip() and setup.seed is not None:
+        setup.seed.route_path = route.strip()
+    return lockout_check(setup).as_dict()
+
+
+@server.tool(
+    description=(
+        "Test rules written in plain English against a running app — 'no user should ever see "
+        "another user's email address'. Each rule comes back violated, held, or NOT_TESTED. "
+        "Treat not_tested as unknown, never as safe: report it in those words. Fires real "
+        "requests as the attacking account, so localhost only, and ask the developer for that "
+        "account before calling. Pass rules separated by a newline or a pipe."
+    )
+)
+def tainted_invariants(
+    repo_path: str, rules: str, url: str, login_b: str = "", seed: str = "", anon_key: str = ""
+) -> dict:
+    from tainted.invariants import check_invariants
+
+    parsed = [r.strip() for r in rules.replace("|", "\n").split("\n") if r.strip()]
+    if not parsed:
+        return {"error": "No rules given. Pass one rule per line."}
+    if not login_b.strip():
+        return {
+            "action_required": "ask_user",
+            "needs_credentials": ["login_b"],
+            "message": (
+                "Rules are tested by sending real requests as an account that should NOT be "
+                "allowed the thing the rule forbids. Ask the developer for that login."
+            ),
+        }
+    setup = _build_setup(url, login_b, login_b, seed, anon_key)
+    if not setup.target.is_local:
+        return {"error": f"{setup.target.url} is not local — refusing."}
+    return check_invariants(parsed, repo_path, setup, llm=_llm_or_none()).as_dict()
+
+
+@server.tool(
+    description=(
+        "Read-only. A receipt for one analysis: what fired, what worked, and what was never "
+        "tried — with the untested surface INSIDE the signed payload, so it cannot be deleted "
+        "from a document that still verifies. Pass `secret` to sign it; without one the "
+        "receipt is unsigned and says so. Hand this to someone doing security diligence."
+    )
+)
+def tainted_receipt(repo_path: str, exclude: str = "", secret: str = "") -> dict:
+    from tainted.receipt import build_receipt, sign as _sign
+
+    patterns = [p.strip() for p in exclude.split(",") if p.strip()]
+    result = core_analyze(repo_path, llm=_llm_or_none(), exclude=patterns)
+    rec = build_receipt(build_report(result))
+    signature = _sign(rec, secret.encode("utf-8")) if secret else None
+    out = rec.as_dict(signature)
+    if signature is None:
+        out["unsigned"] = (
+            "No secret was supplied, so this receipt is not signed. It is a report, not an "
+            "attestation — do not present it as verified."
+        )
+    return out
+
+
+@server.tool(
+    description=(
+        "Turn a PROVEN finding into a security regression test written in the repository's own "
+        "framework (pytest / vitest / jest), so the repo's own CI catches the hole reopening "
+        "without Tainted installed. Returns the filename and source; it does NOT write the "
+        "file — show the developer the source and let them place it. Only works on a finding "
+        "whose exploit actually fired."
+    )
+)
+def tainted_regression_test(repo_path: str, job_id: str, finding_id: str = "", index: int = 0) -> dict:
+    from tainted.regression_test import emit_regression_test
+    from tainted.repro import NotReproducible
+
+    from tainted.report import Report
+
+    job = _JOBS.get(job_id)
+    if job is None or not job.report:
+        return {"error": f"No completed prove job `{job_id}`. Run tainted_prove_start first."}
+    # The job stores the report serialized; rehydrating it is how `tainted_prove_result` already
+    # rebuilds findings for the reproducers, and the emitter needs the same objects.
+    findings = Report.model_validate(job.report).findings
+    chosen = None
+    if finding_id:
+        chosen = next((f for f in findings if f.candidate.id == finding_id), None)
+    elif 0 <= index < len(findings):
+        chosen = findings[index]
+    if chosen is None:
+        return {"error": "That finding was not found in this job's results."}
+    try:
+        return emit_regression_test(chosen, repo_path).as_dict()
+    except (NotReproducible, ValueError) as exc:
+        return {
+            "error": str(exc),
+            "note": (
+                "Tainted refuses to invent a test here rather than emitting one that asserts "
+                "something nobody observed."
+            ),
+        }
+
+
 @server.tool(
     description=(
         "How to use Tainted's tools correctly: call order, the index contract, the async "

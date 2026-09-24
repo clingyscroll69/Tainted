@@ -16,7 +16,10 @@ from __future__ import annotations
 
 import os
 import subprocess
-from typing import Iterator, Optional, Protocol
+from typing import TYPE_CHECKING, Iterator, Optional, Protocol
+
+if TYPE_CHECKING:
+    from tainted.budget import Budget
 
 import tainted
 from tainted.execution.base import (
@@ -166,6 +169,7 @@ class DockerExecutor:
         run_key: Optional[bytes] = None,
         on_candidates: Optional[OnCandidates] = None,
         on_finding: Optional[OnFinding] = None,
+        budget: "Optional[Budget]" = None,
     ) -> ProveOutcome:
         # Same all-or-nothing guard `LocalExecutor` carries (base.py): a caller that passes a
         # plan and its signature without a run key is not asking for an unguarded run, so
@@ -197,6 +201,8 @@ class DockerExecutor:
             plan=_plan_json(plan),
             plan_signature=plan_signature,
             llm_expected=llm_expected,
+            max_seconds=budget.max_seconds if budget is not None else None,
+            max_candidates=budget.max_candidates if budget is not None else None,
         )
         argv = self._argv(repo_path, has_key=key is not None, has_llm_key=llm_expected)
         env = {RUN_KEY_ENV: key.hex()} if key is not None else {}
@@ -242,6 +248,7 @@ class DockerExecutor:
                 return ProveOutcome(
                     report=Report.model_validate(event["report"]),
                     blocked_calls=event.get("blocked_calls", []),
+                    budget=event.get("budget"),
                 )
         raise SandboxUnavailable(
             "The sandbox run ended without reporting a result. The container was probably "

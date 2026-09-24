@@ -847,6 +847,70 @@ h1,h2,h3,p{margin:0}
 .gates .s{font-family:var(--ff-data);font-size:0.75rem;letter-spacing:.04em;color:var(--verified)}
 .gates .s.off{color:var(--wash-dim)}
 
+/* ---- the second band: three questions the run answers after the findings ----
+   A separate band rather than three more panels in the first one: at four columns a
+   seventh panel would sit alone in a second row, and these three are a different kind of
+   statement anyway — not what was found, but what was asked and what was promised. */
+.band3{grid-template-columns:repeat(3,minmax(0,1fr))}
+
+/* Stated rules. The marks are deliberately the same vocabulary as Proof strength, because
+   they mean the same things: a violated rule IS a fired exploit that succeeded, so it earns
+   the lamp; a rule that held is an attack the app refused, so it takes the dashed ring; a
+   rule nobody could fire at is not attempted, so it stays faint. Reusing the marks is what
+   stops this panel inventing a second private language for proof. */
+.rules{list-style:none;margin:0;padding:0}
+.rules li{display:grid;grid-template-columns:auto 1fr;gap:4px 11px;align-items:start;
+  padding:10px 0;border-bottom:1px solid var(--rule-soft)}
+.rules li:last-child{border-bottom:0}
+.rules .dot{width:8px;height:8px;border-radius:50%;background:var(--wash-faint);margin-top:5px}
+.rules .dot.lamp{background:var(--lamp)}
+.rules .dot.nr{background:transparent;border:1.5px dashed var(--wash-dim)}
+.rules .r{font-size:0.8125rem;color:var(--snow);line-height:1.45}
+/* The verdict is a word, never only a colour — a hue is unavailable under forced colours and
+   a shape is unavailable to a screen reader. */
+/* `block`, so the verdict sits on its own line for every rule. Inline, it wrapped only when
+   the rule above it was long enough to push it, which put the same element in two different
+   places down one list and let a short rule read as "...tenant filter NOT TESTED". */
+.rules .v{display:block;margin-top:2px;font-family:var(--ff-data);font-size:0.6875rem;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--wash-dim)}
+.rules .v.on{color:var(--lamp-tint)}
+.rules .why{grid-column:2;font-size:0.75rem;line-height:1.5;color:var(--wash-dim);margin:0}
+
+/* Owner access. No warm ink here on purpose, and the panel says why: nothing was exploited
+   to produce this result, so lighting the lamp for it would break the one rule the palette
+   exists to enforce. A lockout is the opposite failure and gets its own cold, barred mark. */
+.lock{list-style:none;margin:0;padding:0}
+.lock li{display:grid;grid-template-columns:auto 1fr auto;gap:4px 11px;align-items:center;
+  padding:9px 0;border-bottom:1px solid var(--rule-soft);font-size:0.8125rem;color:var(--wash)}
+.lock li:last-child{border-bottom:0}
+.lock .dot{width:8px;height:8px;border-radius:50%;background:var(--wash-faint);position:relative}
+.lock .dot.ok{background:transparent;border:1.5px solid var(--verified)}
+/* Barred, not filled: a bar reads as "shut" at 8px where a second hue would only read as
+   "a different colour", and it survives forced-colors where a fill does not. */
+.lock .dot.shut{background:transparent;border:1.5px solid var(--wash-dim)}
+.lock .dot.shut::after{content:"";position:absolute;left:-2px;right:-2px;top:50%;height:1.5px;
+  background:var(--wash);transform:translateY(-50%) rotate(-45deg)}
+.lock .s{font-family:var(--ff-data);font-size:0.6875rem;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--wash-dim)}
+.lock .why{grid-column:2/-1;font-size:0.75rem;line-height:1.5;color:var(--wash-dim);margin:0}
+
+/* The receipt. A digest is a value the engine computed, so it is set in the data face like
+   every other measured number on this page. */
+.receipt{display:grid;gap:10px}
+.receipt .dg{font-family:var(--ff-data);font-size:0.6875rem;letter-spacing:-.02em;
+  color:var(--wash);word-break:break-all;background:var(--scrim);border:1px solid var(--rule);
+  padding:8px 10px}
+.receipt .row{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;
+  font-size:0.8125rem;color:var(--wash);padding:7px 0;border-bottom:1px solid var(--rule-soft)}
+.receipt .row .q{font-family:var(--ff-data);font-size:0.75rem;color:var(--snow);letter-spacing:-.02em}
+
+/* A textarea in the run form, sized to the two or three rules anyone writes at once. */
+.setup textarea{width:100%;background:var(--scrim);color:var(--snow);border:1px solid var(--rule-ctl);
+  font:inherit;font-size:0.8125rem;padding:8px 10px;min-height:66px;resize:vertical}
+.setup textarea:focus-visible{outline:2px solid var(--thermo);outline-offset:1px}
+
+@media (max-width:1180px){.band3{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
 /* The taint profile: one bar per possible hole, at the depth and strength the run found. */
 .profile{width:100%;min-width:0;height:184px;display:block;margin-top:2px}
 
@@ -1395,6 +1459,19 @@ html.is-diving,html.is-diving body{overflow:hidden}
 }
 .snd-cross i{position:absolute;left:0;right:0;top:0;bottom:0;display:block;opacity:0}
 
+/* Into the cleaning station: the water thickens with the reef's own traffic. A brief drift
+   of particulate from the side rather than from above — you have not gone deeper so much as
+   arrived somewhere busy. */
+.sounding[data-cross="tool_tenancy"] .snd-cross .queue{
+  background:linear-gradient(90deg,transparent,rgb(var(--ch-wash) / .16) 45%,rgb(var(--ch-wash) / .05) 70%,transparent);
+  animation:cross-queue var(--dur-cross) ease-in-out 1;
+}
+@keyframes cross-queue{
+  0%  {opacity:0;transform:translateX(-18%)}
+  30% {opacity:1}
+  100%{opacity:0;transform:translateX(16%)}
+}
+
 /* Into the sunlit shelf: breaking the surface. One white wash from above, brightest
    moment of the dive. */
 .sounding[data-cross="test_integrity"] .snd-cross .surface{
@@ -1887,13 +1964,21 @@ html.is-diving,html.is-diving body{overflow:hidden}
   --w-haze:#7C9FB4; --w-deep:#010A11; --w-accent:#8E9BC8;
   --w-beam:.9;     --w-snow:.6;
 }
-/* 4. The drop-off — bola. The shelf ends. Deliberately almost nothing to see. */
+/* 4. The cleaning station — tool_tenancy. Still reef, but the light is going. It sits
+   between the overhang and the drop-off because that is where the check sits: the same
+   tool plane as agent_injection, failing the same way bola fails. */
+[data-world="tool_tenancy"]{
+  --w-top:#072030; --w-bot:#03101A;
+  --w-haze:#6F92A8; --w-deep:#010C14; --w-accent:#7FA8B8;
+  --w-beam:.95;    --w-snow:.5;
+}
+/* 5. The drop-off — bola. The shelf ends. Deliberately almost nothing to see. */
 [data-world="bola"]{
   --w-top:#05131F; --w-bot:#020810;
   --w-haze:#5E7A93; --w-deep:#00060B; --w-accent:#6E86A6;
   --w-beam:1;      --w-snow:.4;
 }
-/* 5. Trench mouth — rls. Nothing is lit from above, so anything visible is making its own. */
+/* 6. Trench mouth — rls. Nothing is lit from above, so anything visible is making its own. */
 [data-world="rls"]{
   --w-top:#020A11; --w-bot:#000406;
   --w-haze:#4E7186; --w-deep:#000305; --w-accent:var(--thermo);
@@ -2972,6 +3057,18 @@ html.is-diving,html.is-diving body{overflow:hidden}
           <!-- Not masked, and not a secret: the Supabase anon key is the public value the
                browser sends with every request. Presenting it as a password taught the
                opposite, and blocked password managers on a field that never wanted one. -->
+          <!-- Rules the reader knows about their own app and no analysis can recover. They are
+               fired as real requests by the same run, so they live with the credentials that
+               fire them rather than in a panel of their own. -->
+          <label for="f-rules" data-needs-repo>Rules this app must never break</label>
+          <textarea id="f-rules" data-needs-repo rows="3" spellcheck="false"
+                    aria-describedby="rulesnote"
+                    placeholder="No user should ever see another user&rsquo;s email address"></textarea>
+          <p class="formnote" id="rulesnote" data-needs-repo>
+            One per line, in plain English. Tainted turns each into a real request and fires it.
+            A rule it cannot build an attack for comes back <em>not tested</em> &mdash; never as a
+            rule that held.
+          </p>
           <label for="f-key" data-needs-repo>Anon key</label>
           <input id="f-key" data-needs-repo autocomplete="off" spellcheck="false"
                  placeholder="(Supabase anon key &mdash; public, optional)">
@@ -3153,6 +3250,48 @@ html.is-diving,html.is-diving body{overflow:hidden}
   </section>
 </div>
 
+</div>
+
+<!-- ============ second band: what was asked, and what was promised ============ -->
+<div class="band band3">
+  <section aria-labelledby="hd-rules">
+    <div class="panel-hd"><h2 class="lbl" id="hd-rules">Stated rules</h2></div>
+    <div class="bd">
+      <ul class="rules" id="ruleslist">
+        <li><p class="why" style="grid-column:1/-1">Write a rule in the run form and prove the
+          app. Each one is fired as a real request; the marks here mean exactly what they mean
+          in <b>Proof strength</b>.</p></li>
+      </ul>
+      <p class="note" id="rulesfoot" hidden></p>
+    </div>
+  </section>
+
+  <section aria-labelledby="hd-owner">
+    <div class="panel-hd"><h2 class="lbl" id="hd-owner">Owner access</h2></div>
+    <div class="bd">
+      <ul class="lock" id="locklist">
+        <li><p class="why" style="grid-column:1/-1">Whether your own users can still reach their
+          own data. Needs account A and a seed record.</p></li>
+      </ul>
+      <button class="mini wide" type="button" id="checklock">Check owner access</button>
+      <!-- The one place on this page where a failure is deliberately not lit. Saying so is
+           cheaper than letting a reader wonder whether the lamp is broken. -->
+      <p class="note">No lamp here, whatever the result: nothing is exploited to produce it.
+        This is the opposite failure &mdash; secure, and broken.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="hd-receipt">
+    <div class="panel-hd"><h2 class="lbl" id="hd-receipt">Receipt</h2></div>
+    <div class="bd">
+      <div class="receipt" id="receiptbox">
+        <p class="note" id="receiptnote">What fired, what worked, and what was never tried &mdash;
+          with the untested surface inside the signed payload, so it cannot be removed from a
+          document that still verifies.</p>
+      </div>
+      <button class="mini wide" type="button" id="getreceipt">Build a receipt</button>
+    </div>
+  </section>
 </div>
 </main>
 
@@ -4044,7 +4183,7 @@ html.is-diving,html.is-diving body{overflow:hidden}
        one `data-cross` names, or none if it names nothing. -->
   <div class="snd-cross" aria-hidden="true">
     <i class="surface"></i><i class="silt"></i><i class="eclipse"></i>
-    <i class="void"></i><i class="bloom"></i>
+    <i class="queue"></i><i class="void"></i><i class="bloom"></i>
   </div>
   <!-- The world's name card, shown once on the way in. -->
   <div class="snd-card" id="snd-card" aria-hidden="true"><b></b><i></i><em></em></div>
@@ -4141,14 +4280,21 @@ html.is-diving,html.is-diving body{overflow:hidden}
     {check:'agent_injection',   depth:36, zone:'Coral overhang',
      pace:[.37, .21, .27, .18, .31],
      sub:'One agent scope with both a source and a sink.'},
-    {check:'bola',              depth:48, zone:'The drop-off',
+    /* Sixth stop, and the reason every depth below it moved. A layer owns twelve units
+       because `depthFor` spreads up to nine, so a new check could not be slotted between two
+       existing ones without its neighbour's fourth candidate printing into it. Extending the
+       scale keeps that invariant instead of quietly breaking it. */
+    {check:'tool_tenancy',      depth:48, zone:'The cleaning station',
+     pace:[.28, .44, .36, .30, .38],
+     sub:'One shared tool, answering whoever presents an id.'},
+    {check:'bola',              depth:60, zone:'The drop-off',
      pace:[.30, .98, 1.15, .28, .13],
      sub:'Another user\u2019s object, reached with your own token.'},
-    {check:'rls',               depth:60, zone:'Trench mouth',
+    {check:'rls',               depth:72, zone:'Trench mouth',
      pace:[.17, .12, .09, .08, .07],
      sub:'The database\u2019s own row policy. What it lets through.'}
   ];
-  const DEPTH_MAX = 70;                       // the scale the rail and the footer print
+  const DEPTH_MAX = 82;                       // the scale the rail and the footer print
   const THERMOCLINE = 10;                     // the ownership check, in the same units
   /* An unknown check still has to be drawn somewhere, so a sixth check added later doesn't
      vanish from every picture. It gets the old fallback depth and a layer built at
@@ -6170,6 +6316,69 @@ html.is-diving,html.is-diving body{overflow:hidden}
        is another submersible's lights working across the void; midway through its pass it
        turns enough to light its own hull, revealing it's the same class of vehicle as yours —
        representing another user's object reached with your own token. */
+    /* 4. The cleaning station — tool_tenancy. A cleaning station is a real place on a reef:
+       one rock, one small resident service, and a queue of whatever turns up. The cleaner
+       does not know whose reef it is and does not ask. It reads what is presented — a client
+       holding still with its gills open — and it services that. Which is the check exactly:
+       one shared tool backend, several tenants, and an identifier taken as authority.
+
+       So the argument is the queue, and the queue is built from bodies that share nothing:
+       a parrotfish, a cuttlefish and an eagle ray waiting at the same rock is three unlike
+       callers being served by one service. Three of the same fish would have drawn a shoal,
+       which says the opposite — one kind of thing, belonging together.
+
+       The far plane repeats the station, smaller and dimmer, because the point is not that
+       one rock is careless. It is that this is how the whole reef works. */
+    SEA.tool_tenancy = function(fromD, toD){
+      const h = (toD - fromD) * ppm;
+
+      /* Far: the same arrangement again, twice, at haze tone. Systemic, not local. */
+      const f = bandOn(FAR, fromD, toD);
+      [[.18, .22, 74], [.72, .58, 58]].forEach(([left, top, w], i) => {
+        put(f, 's-brain', Object.assign(AT('s-brain', w),
+            {left: (left * 100) + '%', top: px(h * top)}));
+        put(f, 's-fish', Object.assign(AT('s-fish', w * .42),
+            {left: ((left + .06) * 100) + '%', top: px(h * (top - .02)),
+             animationDelay: (-i * 5.3) + 's', opacity: '.5'}), 'w-hover');
+      });
+      /* Anthias over the far reef: the cleaners' own kind, going about their day. They are
+         the only thing here in numbers, and they are not the subject. */
+      shoal(f, {id: 's-anthias', n: 11, w: 26, top: h * .4,
+                spread: h * .1, wobble: 22, dur: 74, cls: 'w-swim-back'});
+
+      /* Mid: the station itself. A bommie on a spur, and the queue beside it. */
+      const m = bandOn(MID, fromD, toD);
+      mass(m, '0 0 600 200',
+        '<path fill="currentColor" fill-opacity=".42" d="M0 200V96q86-34 168-6t150 10 142-52 140-18v170Z"/>',
+        {left: '0', top: px(h * .62), width: '100%', height: px(h * .38)});
+      put(m, 's-spur', {left: '30%', top: px(h * .52),
+                        width: '190px', height: px(h * .2)});
+      put(m, 's-brain', Object.assign(AT('s-brain', 132),
+          {left: '34%', top: px(h * .49)}));
+      put(m, 's-anem', Object.assign(AT('s-anem', 58),
+          {left: '47%', top: px(h * .56)}), 'sway');
+
+      /* The queue. Three body plans, held at the rock, each waiting its turn. `w-hover` is
+         the verb for all three on purpose: waiting is the behaviour the check is about. */
+      put(m, 's-parrot', Object.assign(AT('s-parrot', 104),
+          {left: '22%', top: px(h * .40)}), 'w-hover');
+      put(m, 's-cuttle', Object.assign(AT('s-cuttle', 96),
+          {left: '52%', top: px(h * .34), animationDelay: '-3.7s'}), 'w-hover');
+      put(m, 's-eagleray', Object.assign(AT('s-eagleray', 146),
+          {left: '0', top: px(h * .18)}), 'w-swim w-eagleray');
+
+      /* And the cleaner: one small fish, working, indifferent to which of them it is on. */
+      put(m, 's-anthias', Object.assign(AT('s-anthias', 34),
+          {left: '38%', top: px(h * .45), animationDelay: '-1.4s'}), 'w-hover');
+
+      /* Near: a second client arriving out of the dark on the reader's side of the vehicle,
+         so the queue reads as ongoing rather than as a tableau that was arranged for them. */
+      const n = bandOn(NEAR, fromD, toD);
+      put(n, 's-fish2', Object.assign(AT('s-fish2', 88),
+          {left: '0', top: px(h * .74), animationDelay: '-11s', opacity: '.55'}), 'w-swim');
+    };
+
+    /* 5. The drop-off — bola. */
     SEA.bola = function(fromD, toD){
       const h = (toD - fromD) * ppm;
       const f = bandOn(FAR, fromD, toD);
@@ -7348,6 +7557,133 @@ html.is-diving,html.is-diving body{overflow:hidden}
       scan.disabled = false;
     }
   }
+  /* ------------------------------------------------------------------ *
+   * The three questions the second band answers.
+   *
+   * All three send the same credentials the prove form already holds, because all three are
+   * the same capability: real requests at a target the reader has shown they own. None of
+   * them invents a field of its own.
+   * ------------------------------------------------------------------ */
+  function liveBody(){
+    return Object.assign(repoSelection(), {
+      url: val('f-url'),
+      email_a: val('f-a-email'),
+      password_a: document.getElementById('f-a-pass').value,
+      email_b: val('f-b-email'),
+      password_b: document.getElementById('f-b-pass').value,
+      seed: val('f-seed') || null,
+      anon_key: val('f-key') || null,
+      ownership_token: val('f-own') || null
+    });
+  }
+
+  function statedRules(){
+    return document.getElementById('f-rules').value
+      .split('\n').map(r => r.trim()).filter(Boolean);
+  }
+
+  /* The marks are the ones Proof strength already uses, and the mapping is not a style
+     choice: a violated rule is an exploit that fired and succeeded, which is the only thing
+     allowed to light the lamp. Held is an attack the app refused — the dashed ring. Not
+     tested is nothing fired at all, so it stays faint, exactly like a candidate nobody
+     attempted. */
+  const RULE_MARK = {violated: 'lamp', held: 'nr', not_tested: ''};
+  const RULE_WORD = {violated: 'Violated', held: 'Held', not_tested: 'Not tested'};
+
+  function renderRules(report){
+    const list = document.getElementById('ruleslist');
+    const foot = document.getElementById('rulesfoot');
+    if(!report || !report.results || !report.results.length){
+      list.innerHTML = '<li><p class="why" style="grid-column:1/-1">No rules were given for ' +
+        'this run.</p></li>';
+      foot.hidden = true;
+      return;
+    }
+    list.innerHTML = report.results.map(r => {
+      const mark = RULE_MARK[r.verdict] || '';
+      const lit = r.verdict === 'violated' ? ' on' : '';
+      return '<li><span class="dot ' + mark + '" aria-hidden="true"></span>' +
+        '<span><span class="r">' + ESC(r.rule) + '</span> ' +
+        '<span class="v' + lit + '">' + ESC(RULE_WORD[r.verdict] || r.verdict) + '</span></span>' +
+        '<p class="why">' + ESC(r.detail) + '</p></li>';
+    }).join('');
+    foot.hidden = false;
+    foot.textContent = report.headline + ' ' + report.reminder;
+  }
+
+  /* Fired after a prove run, with the same gate already cleared — so a reader who proved a
+     target does not have to re-establish ownership to test a sentence about it. A failure
+     here never fails the run: the findings are real whether or not the rules could be fired,
+     and the panel says which happened. */
+  async function runRules(){
+    const rules = statedRules();
+    if(!rules.length) return;
+    try {
+      renderRules(await call('/api/invariants', Object.assign(liveBody(), {rules: rules})));
+    } catch(e){
+      const list = document.getElementById('ruleslist');
+      list.innerHTML = '<li><span class="dot" aria-hidden="true"></span><span>' +
+        '<span class="v">Not tested</span></span><p class="why">' + ESC(e.message) +
+        ' Nothing was fired, so nothing is known about these rules.</p></li>';
+    }
+  }
+
+  function renderLockout(res){
+    const list = document.getElementById('locklist');
+    if(!res.checked || !res.checked.length){
+      list.innerHTML = '<li><span class="dot" aria-hidden="true"></span>' +
+        '<span>Not checked</span><span class="s">NOT A PASS</span>' +
+        (res.undecided || []).map(u =>
+          '<p class="why">' + ESC(u.reason) + '</p>').join('') + '</li>';
+      return;
+    }
+    list.innerHTML = res.checked.map(c =>
+      '<li><span class="dot ' + (c.owner_locked_out ? 'shut' : 'ok') + '" aria-hidden="true"></span>' +
+      '<span>' + ESC(c.resource) + ' <span class="s">via ' + ESC(c.via) + '</span></span>' +
+      '<span class="s">' + (c.owner_locked_out ? 'LOCKED OUT' : 'REACHABLE') + '</span>' +
+      '<p class="why">' + ESC(c.detail) + '</p></li>').join('');
+  }
+
+  document.getElementById('checklock').addEventListener('click', async ev => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      renderLockout(await call('/api/lockout', liveBody()));
+    } catch(e){
+      renderLockout({checked: [], undecided: [{reason: e.message}]});
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  document.getElementById('getreceipt').addEventListener('click', async ev => {
+    const btn = ev.currentTarget;
+    const box = document.getElementById('receiptbox');
+    btn.disabled = true;
+    try {
+      const rec = await call('/api/receipt', repoSelection());
+      const fired = (rec.fired || []).length;
+      const worked = (rec.fired || []).filter(f => f.succeeded).length;
+      const silent = ((rec.not_tested || {}).not_proved || []).length;
+      box.innerHTML =
+        '<div class="row">Attacks fired<span class="q">' + fired + '</span></div>' +
+        '<div class="row">Of those, succeeded<span class="q">' + worked + '</span></div>' +
+        '<div class="row">Checks not fully proven<span class="q">' + silent + '</span></div>' +
+        '<div class="dg">' + ESC(rec.digest) + '</div>' +
+        /* Said plainly, because an unsigned receipt presented as an attestation is the exact
+           overclaim the artifact exists to prevent. This server does not hold a key, and
+           signing on the reader's behalf would be attesting for them. */
+        /* The engine's own sentence, printed as it comes. It already says the receipt is
+           unsigned and what to do about it; appending a second sentence saying the same thing
+           read as a stutter on screen. */
+        '<p class="note">' + ESC(rec.unsigned || '') + '</p>';
+    } catch(e){
+      box.innerHTML = '<p class="note">Could not build a receipt. ' + ESC(e.message) + '</p>';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   document.getElementById('setup').addEventListener('submit', ev => {
     ev.preventDefault();
     /* Enter in any field submits this form. Disabling `#scan` does not stop that. */
@@ -7478,6 +7814,12 @@ html.is-diving,html.is-diving body{overflow:hidden}
       fail('The run ended without a report. Try again.');
       return;
     }
+
+    /* The run proved out, so the gate is already cleared and any stated rules can be fired at
+       the same target. Deliberately not awaited: the rules are a second question about the
+       same app, and making the descent wait on them would hold the findings off the screen
+       for a request that has nothing to do with them. */
+    runRules();
 
     /* Two ways to arrive at the result without a descent. A `#proved` link is one: someone
        re-opening a finished run is re-reading it, and six seconds of animation for

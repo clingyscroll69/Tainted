@@ -38,6 +38,71 @@ Tainted states plainly how far it reached rather than assuming it reached everyt
 - `fix(finding)` — writes the fix as a patch. A request-plane fix is verified by applying
   it and running `prove` again; an agent fix is checked at once against the graph it leaves.
 
+### Built on those three (added in 0.2.0)
+
+Every one of these is a composition of `analyze` / `prove` / `fix`, and each is honest about the
+one thing it cannot see:
+
+- `preflight(setup)` — refuse to prove until the run is sound, naming the check that isn't:
+  ownership valid, target reachable, account B can log in, and **account A can read A's own
+  record** (if it can't, a "B couldn't read it either" result would be a false all-clear).
+- `reprove(finding, setup)` — re-fire one finding's exploit on demand, decoupled from patching.
+  `proven → fixed → proven-again` is a regression nobody else can name.
+- `second_opinion(finding, setup)` — fire a previously-proven exploit at a **patched** target (a
+  branch, someone else's autofix). Still open, fixed, or secured-but-the-owner-is-locked-out —
+  backed by a fired exploit rather than a re-scan.
+- `regression_check(repo, edits, test_cmd)` — run the repo's own suite before and after a patch,
+  so a fix is only `FIXED` when the attack is closed **and** nothing else broke.
+- `pairing_diff(base, head)` — the new agent source+sink co-locations a change introduced, scoped
+  honestly to the repository-declared graph.
+- `completion_gate(findings)` — a pass/block verdict for a coding agent: no new **proven** hole.
+- `prove(..., budget=Budget(max_seconds=..., max_candidates=...))` — cap a run and stop
+  gracefully, emitting everything proven so far and how much it did not reach.
+
+### Added since 0.2.0
+
+Six more, each a composition of the same three operations, each honest about what it cannot see:
+
+- `lockout_check(setup)` — the **opposite** failure from a hole: the attack is blocked and the
+  *owner* can no longer reach their own data. Secure and broken is still broken. Nothing checked
+  is reported as undecided, never as a pass.
+- `check_invariants(rules, repo, setup)` — rules you write in plain English ("no user should ever
+  see another user's email address"), compiled into one real request each and fired. Three
+  verdicts: **violated**, **held**, **not tested** — and the third is the point.
+- `build_receipt(report)` / `sign` / `verify_payload` — a canonical receipt of what fired, what
+  worked, and what was never tried, with the **untested surface inside the signed payload**, so
+  the admissions cannot be stripped from a document that still verifies.
+- `emit_regression_test(finding, repo)` — a proven exploit written out as a test in *your* test
+  framework (pytest / vitest / jest), asserting the attack **fails**. It imports nothing from
+  Tainted, so it keeps working after Tainted is gone. No framework detected means it refuses
+  rather than guesses.
+- `measure_exposure(findings, setup, consented=True)` — how many rows the attacking account can
+  actually reach through a proven hole, and which columns. Counted via PostgREST
+  `Prefer: count=exact`, so the total arrives in a header while the body stays at one row:
+  **counts and column names, never values.** Opt-in, and uncounted is never rendered as zero.
+- **`Check.TOOL_TENANCY`** — BOLA one layer up. Two tenants, one shared tool backend, and a
+  `get_x(id)` tool that authorizes on the identifier instead of the caller. Not gated on
+  co-location: that makes an agent *turnable*, which is a different question from whether the
+  backend checks ownership at all.
+
+Surface entry points for those: `tainted lockout|invariants|receipt` on the CLI; `tainted_lockout`,
+`tainted_invariants`, `tainted_receipt`, `tainted_regression_test` as MCP tools; `TAINTED_RECEIPT`,
+`TAINTED_RECEIPT_SECRET`, `TAINTED_INVARIANTS` and `TAINTED_LOCKOUT` in CI (a violated rule or a
+locked-out owner fails the job); and `/api/receipt`, `/api/invariants`, `/api/lockout` on the
+website, the last two behind the same ownership gate as `/api/prove`.
+
+Every report also carries three projections (`tainted.report.enrich`): a **0-100 priority**
+(severity × proof strength — a proven low outranks a reported critical), **standard ids** tiered
+`(proven)` vs `(static)` (OWASP ASI/API, MITRE ATLAS, CWE), and a **silence ledger** of what was
+not tested and why. `tainted.report.sarif.to_sarif` emits SARIF 2.1.0 with proof strength on each
+result and the silence ledger on the run. Proven findings can emit a `curl` line and a
+zero-dependency replay script (`tainted.repro`), with credentials scrubbed to env references.
+
+New surface entry points: `tainted sarif|ledger|mutate-security` and `--max-minutes` /
+`--max-candidates` on the CLI; `tainted_sarif`, `tainted_ledger`, `tainted_mutate_security` MCP
+tools plus enriched `tainted_analyze`; `TAINTED_SARIF` and `TAINTED_DIFF_ONLY` in CI; and
+`/api/sarif`, `/api/ledger` on the website.
+
 ## Checks, and how far each one is proven
 
 | Check | Static | Dynamic proof |
@@ -47,6 +112,7 @@ Tainted states plainly how far it reached rather than assuming it reached everyt
 | **Classic injection** | Regex pass, confirmed by Semgrep taint | SQL injection is proven live on read routes; on a write route the payload is built and held. Command and template injection are demonstrated with a real payload but never executed |
 | **Agent injection** | Reads the tool graph across MCP, n8n, Flowise, LangChain (Python/JS), CrewAI | A configured agent is proven in a sandbox with logging-stub tools, and only when the sink call carries a string the attack's payload chose; a payload that names none is reported, not run. A coded agent is reported from the code only, never run |
 | **Test integrity** | — | The mutant that survives (via Stryker / mutmut) is itself the proof |
+| **Tool tenancy** | Finds tools that fetch a record by identifier across the same tool graph | Tenant B's agent calls the shared backend for tenant A's record; only a returned record that is attributably A's counts |
 
 Every report says which checks were proven and which were only analyzed. Without that,
 a report with no proof column reads as a clean bill of health when it might just mean

@@ -42,6 +42,18 @@ needs the repository's test dependencies and mutmut or Stryker. The action's con
 none of those, and says *Not measured* if asked; run `tainted analyze . --only test_integrity`
 (from `tainted-cli`) in a step after your install step instead.
 
+## Three more gates
+
+Each is opt-in, and each fails the job for a different reason:
+
+| Variable | What it does |
+|---|---|
+| `TAINTED_INVARIANTS` | Rules this app must never break, in plain English, one per line (or pipe-separated). Each becomes a real request and is fired. **A violated rule fails the job.** A rule that could not be tested is reported as `not_tested` and never as passing, so it does not gate. Needs a target and `TAINTED_LOGIN_B`. |
+| `TAINTED_LOCKOUT` | `true` checks that this change did not lock the **owner** out of their own data. **A locked-out owner fails the job** — a change that secures the data by making it unreachable has not shipped a working feature. Needs a target, `TAINTED_LOGIN_A` and `TAINTED_SEED`. |
+| `TAINTED_RECEIPT` | A path to write a receipt of the run: what fired, what worked, and what was never tried. Set `TAINTED_RECEIPT_SECRET` to sign it; without one it is written unsigned and the job log says so, because an unsigned receipt is a report and not an attestation. The untested surface is **inside** the signed payload, so it cannot be stripped from a document that still verifies. |
+
+All four are exposed as action inputs too: `invariants`, `lockout`, `receipt`, `receipt-secret`.
+
 ## The walkthrough
 
 `TAINTED_TUTORIAL=1` prints the setup walkthrough and exits without scanning — useful from

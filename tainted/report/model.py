@@ -135,12 +135,26 @@ _COVERAGE_RULES: dict[Check, tuple[bool, str]] = {
         "in code are argued from the graph only, since proving one means booting your "
         "repository. Give Tainted a runnable entrypoint to prove those too.",
     ),
+    Check.TOOL_TENANCY: (
+        True,
+        "Tainted called the tool as a second tenant, asking for the first tenant's record, and "
+        "only claims a hole when the record that came back is demonstrably the other tenant's. "
+        "Without two tenant credentials and a reachable backend it is reported from the tool "
+        "graph instead, and says so.",
+    ),
     Check.TEST_INTEGRITY: (
         False,
         "This is a measurement, not an attack: a surviving mutant is its own proof, so there "
         "is nothing to run and nothing to prove.",
     ),
 }
+
+# Every check must have a rule. An unmapped one produced a coverage note with an EMPTY detail,
+# which renders as a bar with no sentence beside it — the coverage column's whole job is that
+# sentence, so a silent blank there is worse than no row at all.
+assert set(_COVERAGE_RULES) == set(Check), (
+    f"checks missing a coverage rule: {sorted(c.value for c in set(Check) - set(_COVERAGE_RULES))}"
+)
 
 
 # Statuses that mean an attack actually ran and the hole was real. FIXED and
