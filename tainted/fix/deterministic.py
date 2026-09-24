@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from tainted.fix.paths import safe_segment
 from tainted.models import Candidate, FileEdit
 
 
@@ -38,7 +39,8 @@ def generate_rls_fix(candidate: Candidate) -> tuple[list[FileEdit], str, bool]:
     migration = _migration_sql(table, owner_col, policy_name, candidate)
     edits = [
         FileEdit(
-            file=f"supabase/migrations/{_stamp()}_tainted_fix_{table}_rls.sql",
+            # The table name came out of the repository; it names a file only as one segment.
+            file=f"supabase/migrations/{_stamp()}_tainted_fix_{safe_segment(table)}_rls.sql",
             original="",
             replacement=migration,
             description=(

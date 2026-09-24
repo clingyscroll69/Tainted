@@ -724,8 +724,8 @@ def _analysis_for(repo_path: str, llm) -> AnalysisResult:
 
     Keyed on the checkout path, which is unique per request (`tempfile.mkdtemp`) and removed
     after it, so an entry can never outlive the tree it describes or be returned for a
-    different one. A local `repo_path` in dev is stable and may be edited between calls, which
-    is why entries are evicted rather than kept indefinitely.
+    different one. Only fetched checkouts come through here: a local `repo_path` is stable and
+    edited between calls, so `api_fix` analyses it fresh every time.
     """
     with _ANALYSIS_LOCK:
         cached = _ANALYSIS_CACHE.get(repo_path)
@@ -766,7 +766,11 @@ def api_fix(req: FixRequest, request: Request):
 
     with _checkout(req, request) as repo_path:
         llm = _llm_or_none()
-        result = _analysis_for(repo_path, llm)
+        # Only a fetched checkout is keyed safely by its path: it is a fresh temp directory,
+        # removed afterwards. A local `repo_path` is the developer's live tree, edited between
+        # clicks, and a cached analysis of it hands back yesterday's candidates — a finding id
+        # from the report just drawn would then be "not found".
+        result = _analysis_for(repo_path, llm) if req.repo else core_analyze(repo_path, llm=llm)
         cand = _select_candidate(result, req.finding_id, req.index)
 
         answers = (

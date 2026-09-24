@@ -82,7 +82,7 @@ def tainted_analyze(
         unwanted = _parse_checks(skip)
     except ValueError as exc:
         return {"error": f"unknown check: {exc}"}
-    exclude_patterns = [p.strip() for p in exclude.split(",") if p.strip()]
+    exclude_patterns = _exclude_patterns(exclude)
     executing = sorted(c.value for c in (wanted or set()) & _EXECUTES_THE_REPO)
     if executing:
         return {
@@ -293,6 +293,8 @@ def _run_prove(job_id: str, repo_path: str, setup: ProveSetup) -> None:
         "Name it with `finding_id` (a candidate's own `id`, straight out of "
         "tainted_analyze); `index` is a row number in that same report and goes stale "
         "the moment the code does. "
+        "Pass the same `exclude` you gave tainted_analyze, or `index` counts rows of a "
+        "different report. "
         "Tool-plane candidates are architecturally underdetermined: call tainted_fix_interview "
         "first and pass the answers back here as {question_key: choice}."
     )
@@ -302,8 +304,9 @@ def tainted_fix(
     index: int = 0,
     answers: Optional[dict] = None,
     finding_id: str = "",
+    exclude: str = "",
 ) -> dict:
-    result = core_analyze(repo_path, llm=_llm_or_none())
+    result = core_analyze(repo_path, llm=_llm_or_none(), exclude=_exclude_patterns(exclude))
     try:
         cand = select_candidate(result, finding_id=finding_id or None, index=index)
     except LookupError as exc:
@@ -339,8 +342,10 @@ def tainted_fix(
         "confirmation, provenance tracking."
     )
 )
-def tainted_fix_interview(repo_path: str, index: int = 0, finding_id: str = "") -> dict:
-    result = core_analyze(repo_path, llm=_llm_or_none())
+def tainted_fix_interview(
+    repo_path: str, index: int = 0, finding_id: str = "", exclude: str = ""
+) -> dict:
+    result = core_analyze(repo_path, llm=_llm_or_none(), exclude=_exclude_patterns(exclude))
     try:
         cand = select_candidate(result, finding_id=finding_id or None, index=index)
     except LookupError as exc:
@@ -399,6 +404,10 @@ def _parse_checks(value: str) -> Optional[set[Check]]:
     if not value.strip():
         return None
     return {Check(v.strip().lower()) for v in value.split(",") if v.strip()}
+
+
+def _exclude_patterns(exclude: str) -> list[str]:
+    return [p.strip() for p in exclude.split(",") if p.strip()]
 
 
 def _build_setup(

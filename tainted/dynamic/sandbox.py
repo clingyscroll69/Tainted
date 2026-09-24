@@ -41,7 +41,9 @@ class SinkStub:
     name: str
     calls: list[ToolCall] = field(default_factory=list)
 
-    def __call__(self, **args) -> str:
+    def __call__(self, /, **args) -> str:
+        # Positional-only `self`: the arguments are the model's, and a tool call carrying an
+        # argument named `self` would otherwise raise instead of being logged.
         self.calls.append(ToolCall(tool=self.name, args=args))
         return f"[stub:{self.name} logged]"
 

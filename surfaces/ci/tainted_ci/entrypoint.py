@@ -93,7 +93,17 @@ def run() -> int:
         return 0
 
     repo = os.environ.get("TAINTED_REPO", ".")
-    fail_on = Severity(os.environ.get("TAINTED_FAIL_ON", "high").lower())
+    raw_fail_on = os.environ.get("TAINTED_FAIL_ON", "high").strip().lower()
+    try:
+        fail_on = Severity(raw_fail_on)
+    except ValueError:
+        # Same reason as a misspelt check below: a gate that cannot read its threshold must
+        # say so, not die on a traceback nobody reads as a configuration error.
+        print(
+            f"::error::TAINTED_FAIL_ON: unknown severity '{raw_fail_on}'. Choose from: "
+            + ", ".join(s.value for s in Severity)
+        )
+        return 2
     try:
         only = _checks_from_env("TAINTED_ONLY")
         skip = _checks_from_env("TAINTED_SKIP")
@@ -192,7 +202,10 @@ def _open_fix_pr(repo: str, findings, setup) -> str:
             )
         )
 
-    result = open_pull_request(repo, findings, fixes)
+    try:
+        result = open_pull_request(repo, findings, fixes)
+    except ValueError as exc:  # an edit whose path would leave the checkout
+        return f"<sub>Auto-fix: no PR opened — {exc}</sub>"
     if result.opened:
         return f"<sub>Auto-fix: opened {result.url} on `{result.branch}`.</sub>"
     return f"<sub>Auto-fix: no PR opened — {result.note}</sub>"

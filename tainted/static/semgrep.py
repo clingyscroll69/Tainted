@@ -128,12 +128,12 @@ def semgrep_bola_candidates(
         region = _region(repo_path, result)
         if scoping_signals(region):
             continue  # the predicate names the owner — this flow is scoped
-        candidates.append(_bola_candidate(result, region))
+        candidates.append(_bola_candidate(result, region, repo_path))
     return candidates
 
 
-def _bola_candidate(result: dict[str, Any], region: str) -> Candidate:
-    path = result.get("path", "")
+def _bola_candidate(result: dict[str, Any], region: str, repo_path: str = "") -> Candidate:
+    path = _relative(repo_path, result.get("path", ""))
     start = result.get("start", {}) or {}
     line = int(start.get("line", 0) or 0)
     extra = result.get("extra", {}) or {}
@@ -203,12 +203,12 @@ def semgrep_injection_candidates(
         kind = (extra.get("metadata", {}) or {}).get("tainted_kind", "sql")
         if kind not in _DEMO_PAYLOAD:
             continue
-        candidates.append(_injection_candidate(result, kind))
+        candidates.append(_injection_candidate(result, kind, repo_path))
     return candidates
 
 
-def _injection_candidate(result: dict[str, Any], kind: str) -> Candidate:
-    path = result.get("path", "")
+def _injection_candidate(result: dict[str, Any], kind: str, repo_path: str = "") -> Candidate:
+    path = _relative(repo_path, result.get("path", ""))
     line = int((result.get("start", {}) or {}).get("line", 0) or 0)
     extra = result.get("extra", {}) or {}
     snippet = _clip(extra.get("lines", ""))
@@ -279,6 +279,22 @@ def _region(repo_path: str, result: dict[str, Any], window: int = 25) -> str:
     lo = max(0, start - 1 - window)
     hi = min(len(lines), end + window)
     return "\n".join(lines[lo:hi])
+
+
+def _relative(repo_path: str, path: str) -> str:
+    """A Semgrep result path, repo-relative like every other candidate's.
+
+    Semgrep reports each path prefixed with the target it was handed, so a scan of
+    `/work/app` yields `/work/app/api/x.py` where the route scan and the regex pass say
+    `api/x.py`. Left as is, a taint confirmation never matched the regex hit on the same line,
+    no route was ever attached to it, and the location dedupe let duplicates through.
+    """
+    if not repo_path or not path:
+        return path
+    try:
+        return str(Path(path).resolve().relative_to(Path(repo_path).resolve()))
+    except ValueError:
+        return path
 
 
 def _clip(text: str, limit: int = 200) -> str:

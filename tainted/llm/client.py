@@ -23,11 +23,21 @@ class LLMTier(str, Enum):
 
 
 class LLMUnavailable(RuntimeError):
-    """Raised when an LLM call is attempted with no key configured.
+    """Raised when the meaning register cannot answer: no key configured, or a call failed.
 
     Callers on the request plane treat this as "cannot rank" and fall back to a
     deterministic order — the model only decides ordering there, never membership,
     so its absence degrades gracefully.
+    """
+
+
+class LLMCallFailed(LLMUnavailable):
+    """A configured model was asked and did not answer usably (quota, outage, malformed JSON).
+
+    A subclass of `LLMUnavailable` so every caller that already degrades on a missing key
+    degrades the same way on a failed call. Before it existed a provider error escaped as
+    whatever the SDK raised, which no caller caught, so one 429 during ranking aborted the
+    whole analysis instead of costing it the model's ordering.
     """
 
 
@@ -66,7 +76,10 @@ class LLMClient(abc.ABC):
             tier=LLMTier.BULK,
             schema=prompts.RANK_SCHEMA,
         )
-        scores = [float(s) for s in result.get("scores", [])]
+        try:
+            scores = [float(s) for s in _object(result).get("scores", [])]
+        except (TypeError, ValueError) as exc:
+            raise LLMCallFailed(f"the model returned unusable scores: {exc}") from exc
         # Never let a short/garbled response drop candidates: pad with a neutral score.
         if len(scores) < len(items):
             scores += [0.5] * (len(items) - len(scores))
@@ -75,12 +88,12 @@ class LLMClient(abc.ABC):
     def label_tool(self, tool: dict[str, Any]) -> dict[str, Any]:
         """Tool plane: label a tool as source / sink / neither, with a severity for sinks."""
         self._require()
-        return self.complete_json(
+        return _object(self.complete_json(
             system=prompts.TOOL_LABEL_SYSTEM,
             prompt=prompts.tool_label_prompt(tool),
             tier=LLMTier.BULK,
             schema=prompts.TOOL_LABEL_SCHEMA,
-        )
+        ))
 
     def filter_scopes(self, scopes: list[dict[str, Any]]) -> list[bool]:
         """Tool plane: keep/drop co-located scopes before expensive dynamic proof.
@@ -109,7 +122,8 @@ class LLMClient(abc.ABC):
             tier=LLMTier.JUDGE,
             schema=prompts.SCOPE_FILTER_SCHEMA,
         )
-        keep = [bool(k) for k in result.get("keep", [])]
+        result = _object(result)
+        keep = [bool(k) for k in (result.get("keep") or [])]
         reasons = [str(r) for r in (result.get("rationales") or [])]
         if len(keep) < len(scopes):
             keep += [True] * (len(scopes) - len(keep))  # doubt keeps a scope in
@@ -119,32 +133,32 @@ class LLMClient(abc.ABC):
     def judge_applicability(self, question: str, evidence: str) -> dict[str, Any]:
         """Applicability rung 2: read code and answer plainly whether a plane exists."""
         self._require()
-        return self.complete_json(
+        return _object(self.complete_json(
             system=prompts.APPLICABILITY_SYSTEM,
             prompt=prompts.applicability_prompt(question, evidence),
             tier=LLMTier.JUDGE,
             schema=prompts.APPLICABILITY_SCHEMA,
-        )
+        ))
 
     def judge_ownership(self, candidate: dict[str, Any]) -> dict[str, Any]:
         """Decide whether an id is an object reference lacking an ownership check."""
         self._require()
-        return self.complete_json(
+        return _object(self.complete_json(
             system=prompts.OWNERSHIP_SYSTEM,
             prompt=prompts.ownership_prompt(candidate),
             tier=LLMTier.JUDGE,
             schema=prompts.OWNERSHIP_SCHEMA,
-        )
+        ))
 
     def generate_injection(self, scope: dict[str, Any]) -> dict[str, Any]:
         """Tool plane: craft an injection aimed at a specific co-located scope."""
         self._require()
-        return self.complete_json(
+        return _object(self.complete_json(
             system=prompts.INJECTION_SYSTEM,
             prompt=prompts.injection_prompt(scope),
             tier=LLMTier.BULK,
             schema=prompts.INJECTION_SCHEMA,
-        )
+        ))
 
     def _require(self) -> None:
         if not self.available:
@@ -152,3 +166,14 @@ class LLMClient(abc.ABC):
                 "No LLM key configured. Static analysis runs; the meaning register does not. "
                 "Set GEMINI_API_KEY to enable ranking, labeling, and applicability judgment."
             )
+
+
+def _object(result: Any) -> dict[str, Any]:
+    """The model's answer as the JSON object every task schema asks for, or LLMCallFailed.
+
+    Callers read it with `.get`; anything else reaching them would fail as an AttributeError
+    far from the call that produced it, and escape every `except LLMUnavailable` on the way.
+    """
+    if not isinstance(result, dict):
+        raise LLMCallFailed(f"the model returned {type(result).__name__}, not a JSON object")
+    return result

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional
 
+from tainted.fix.paths import edit_target
 from tainted.models import Check, Finding, FindingStatus, FixResult
 
 # Fixes the code fully determines. Everything else needs a human to decide something first.
@@ -68,14 +69,15 @@ def apply_edits(repo: str, fixes: list[FixResult]) -> list[str]:
     looks right in a diff and is wrong in the build.
     """
     written: list[str] = []
+    root = Path(repo).resolve()
     for fix in fixes:
         for edit in fix.edits:
-            path = Path(repo) / edit.file
-            if edit.original:
-                path = path.with_suffix(path.suffix + ".tainted-fix")
+            # Shared with the CLI's `--apply`: the sibling rule, and a refusal for any path
+            # that would land outside the checkout.
+            path = edit_target(root, edit)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(edit.replacement, encoding="utf-8")
-            written.append(str(path.relative_to(repo)))
+            written.append(str(path.relative_to(root)))
     return written
 
 

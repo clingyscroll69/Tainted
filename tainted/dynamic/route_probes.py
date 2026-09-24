@@ -107,14 +107,16 @@ class RouteProber:
         method = candidate.metadata.get("method") or "GET"
         seed = self.setup.seed
 
+        # Neither early return sent a request, so neither may say NOT_REPRODUCED: that status
+        # means the attack ran and held, and the report prints it as exactly that.
         if not route_path:
-            finding.status = FindingStatus.NOT_REPRODUCED
+            finding.status = FindingStatus.REPORTED
             finding.proof = ProbeResult(
                 succeeded=False, kind="route_bola", notes="This possible hole names no route to request."
             )
             return finding
         if seed is None:
-            finding.status = FindingStatus.NOT_REPRODUCED
+            finding.status = FindingStatus.REPORTED
             finding.proof = ProbeResult(
                 succeeded=False,
                 kind="route_bola",

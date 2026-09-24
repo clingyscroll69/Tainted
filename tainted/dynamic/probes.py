@@ -61,9 +61,8 @@ def prove_candidate(
     table = _table_of(candidate, setup)
     finding = Finding(candidate=candidate)
     if table is None:
-        finding.status = FindingStatus.NOT_REPRODUCED
-        finding.proof = ProbeResult(succeeded=False, notes="No table to probe.")
-        return finding
+        # Nothing was sent, so this is not an attack that held.
+        return _unreachable(finding, "No table to probe, so no request was sent.")
 
     # A target that cannot be reached has not resisted anything. Every other probe path
     # degrades this way (`route_probes`, `injection_probes`); this one used to raise straight

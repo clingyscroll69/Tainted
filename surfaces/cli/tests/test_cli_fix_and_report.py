@@ -102,3 +102,40 @@ def test_apply_writes_the_migration_into_the_repo(tmp_path):
     written = list((repo / "supabase" / "migrations").glob("*tainted_fix*"))
     assert written, "the migration should be written into the repo"
     assert "enable row level security" in written[0].read_text()
+
+
+def test_apply_never_overwrites_a_handler_with_its_snippet(tmp_path):
+    """A BOLA fix replaces one read inside a handler. Its `replacement` is only that read, so
+    writing it over the file used to reduce the whole handler to a few lines."""
+    import shutil
+
+    repo = tmp_path / "app"
+    shutil.copytree(ROUTES, repo)
+    before = {p: p.read_text() for p in repo.rglob("*") if p.is_file()}
+
+    report = json.loads(runner.invoke(app, ["analyze", str(repo), "--json"]).stdout)
+    rows = [f["candidate"] for f in report["findings"]] + report["unproven_candidates"]
+    bola = next(c for c in rows if c["check"] == "bola" and c["metadata"].get("route_path"))
+
+    result = runner.invoke(
+        app, ["fix", str(repo), "--finding-id", bola["id"], "--apply"]
+    )
+    assert result.exit_code == 0, result.stdout
+
+    for path, text in before.items():
+        assert path.read_text() == text, f"{path} was overwritten"
+    siblings = list(repo.rglob("*.tainted-fix"))
+    assert len(siblings) == 1
+    assert "beside it" in result.stdout
+
+
+def test_edit_paths_that_leave_the_repository_are_refused(tmp_path):
+    import pytest
+
+    from tainted.fix.paths import edit_target, safe_segment
+    from tainted.models import FileEdit
+
+    with pytest.raises(ValueError, match="outside the repository"):
+        edit_target(tmp_path, FileEdit(file="../../etc/cron.d/x", replacement="*"))
+    segment = safe_segment("../../home/me/.bashrc")
+    assert "/" not in segment and not segment.startswith(".")

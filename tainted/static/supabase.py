@@ -44,6 +44,19 @@ class Policy:
     using_expr: str  # the raw USING(...) / WITH CHECK(...) expression
     source_file: str
     line: int = 0
+    # `AS RESTRICTIVE` policies are ANDed with the rest; the default, permissive, are ORed.
+    restrictive: bool = False
+    # The `TO` clause, lowercased. Empty means the default, `public`: every role.
+    roles: list[str] = field(default_factory=list)
+
+    @property
+    def reaches_clients(self) -> bool:
+        """Whether a browser's role (anon, authenticated, public) is subject to this policy.
+
+        `service_role` and the superuser roles bypass RLS or never reach PostgREST from a
+        browser, so a `true` policy granted only to them exposes nothing to a client.
+        """
+        return not self.roles or any(r not in _SERVER_ROLES for r in self.roles)
 
     @property
     def references_auth_uid(self) -> bool:
@@ -54,6 +67,9 @@ class Policy:
         """A policy whose predicate is literally `true` — everyone passes."""
         stripped = self.using_expr.strip().strip("()").strip().lower()
         return stripped in ("true", "1", "1=1")
+
+
+_SERVER_ROLES = {"service_role", "postgres", "supabase_admin"}
 
 
 # Column names that conventionally hold the owning user's id, best first.
@@ -132,7 +148,7 @@ def _norm_table(name: str) -> str:
 # SQL migration parsing
 # --------------------------------------------------------------------------- #
 _RE_ENABLE_RLS = re.compile(
-    r"alter\s+table\s+(?:only\s+)?([\w\".]+)\s+enable\s+row\s+level\s+security",
+    r"alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?([\w\".]+)\s+enable\s+row\s+level\s+security",
     re.I,
 )
 _RE_POLICY = re.compile(
@@ -141,6 +157,11 @@ _RE_POLICY = re.compile(
     re.I | re.S,
 )
 _RE_FOR = re.compile(r"\bfor\s+(select|insert|update|delete|all)\b", re.I)
+_RE_AS = re.compile(r"\bas\s+(permissive|restrictive)\b", re.I)
+# The clauses before the predicate: `[AS ...] [FOR ...] [TO ...]`. Cut at USING / WITH CHECK so
+# a `to` inside the expression is never read as a role list.
+_RE_PREDICATE_START = re.compile(r"\busing\b|\bwith\s+check\b", re.I)
+_RE_TO = re.compile(r"\bto\s+(.+)$", re.I | re.S)
 _RE_USING = re.compile(r"\busing\s*\((?P<expr>.*?)\)\s*(?:with\s+check|;|\Z)", re.I | re.S)
 _RE_WITH_CHECK = re.compile(r"with\s+check\s*\((?P<expr>.*?)\)\s*(?:;|\Z)", re.I | re.S)
 
@@ -181,6 +202,15 @@ def parse_migration_sql(sql: str, source_file: str, model: SupabaseModel) -> Non
         command = (cmd_m.group(1).lower() if cmd_m else "all")
         using_m = _RE_USING.search(rest) or _RE_WITH_CHECK.search(rest)
         using_expr = (using_m.group("expr").strip() if using_m else "")
+        start = _RE_PREDICATE_START.search(rest)
+        header = rest[: start.start()] if start else rest
+        as_m = _RE_AS.search(header)
+        to_m = _RE_TO.search(header)
+        roles = (
+            [r.strip().strip('"').lower() for r in to_m.group(1).split(",") if r.strip()]
+            if to_m
+            else []
+        )
         line = sql[: m.start()].count("\n") + 1
         model.table(table).policies.append(
             Policy(
@@ -190,6 +220,8 @@ def parse_migration_sql(sql: str, source_file: str, model: SupabaseModel) -> Non
                 using_expr=using_expr,
                 source_file=source_file,
                 line=line,
+                restrictive=bool(as_m and as_m.group(1).lower() == "restrictive"),
+                roles=roles,
             )
         )
 
@@ -237,7 +269,7 @@ def build_model(repo_path: str, exclude: Sequence[str] = ()) -> SupabaseModel:
         for sql_path in root.glob(pattern):
             if sql_path in seen or not sql_path.is_file():
                 continue
-            if any(part in _SKIP_DIRS for part in sql_path.parts):
+            if any(part in _SKIP_DIRS for part in sql_path.relative_to(root).parts):
                 continue
             if exclude and is_excluded(str(sql_path.relative_to(root)), exclude):
                 continue
@@ -251,7 +283,7 @@ def build_model(repo_path: str, exclude: Sequence[str] = ()) -> SupabaseModel:
     for client_path in root.rglob("*"):
         if not client_path.is_file() or client_path.suffix not in _CLIENT_EXTS:
             continue
-        if any(part in _SKIP_DIRS for part in client_path.parts):
+        if any(part in _SKIP_DIRS for part in client_path.relative_to(root).parts):
             continue
         if exclude and is_excluded(str(client_path.relative_to(root)), exclude):
             continue

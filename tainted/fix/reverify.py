@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+import httpx
+
 from tainted.dynamic.probes import prove_candidate
 from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.route_probes import RouteProber
@@ -44,12 +46,21 @@ def reverify_request_plane(
         reproved = prober.prove_route_bola(finding.candidate)
     else:
         reproved = prove_candidate(finding.candidate, setup, replay)
-    attack_blocked = reproved.status != FindingStatus.PROVEN
+    # Only an attack that ran and was refused counts as blocked. A re-prove that never reached
+    # the target (REPORTED) blocked nothing, and reading "not PROVEN" as success turned a dead
+    # preview deploy into a FIXED verdict.
+    attack_blocked = reproved.status is FindingStatus.NOT_REPRODUCED
+    attack_rerun = reproved.status in (FindingStatus.PROVEN, FindingStatus.NOT_REPRODUCED)
     fix.assertions.append(
         ReverifyAssertion(
             name="attack_now_fails",
             passed=attack_blocked,
-            detail=(reproved.proof.notes if reproved.proof else "the probe returned no result"),
+            detail=(
+                (reproved.proof.notes if reproved.proof else "the probe returned no result")
+                if attack_rerun
+                else "The attack could not be re-run, so the fix is unverified: "
+                + (reproved.proof.notes if reproved.proof else "the probe returned no result")
+            ),
         )
     )
 
@@ -64,7 +75,11 @@ def reverify_request_plane(
         )
     )
 
-    fix.resulting_status = _classify(attack_blocked, legit_ok)
+    if attack_rerun:
+        fix.resulting_status = _classify(attack_blocked, legit_ok)
+    else:
+        # Unverified: the finding stands exactly as it did before the fix was written.
+        fix.resulting_status = fix.finding.status
     fix.finding.status = fix.resulting_status
     return fix
 
@@ -75,10 +90,13 @@ def _legitimate_access_survives(
     """As account A, read A's own seed row. It must still come back."""
     if setup.seed is None:
         return True, "No seed record supplied — legitimacy check skipped."
-    replay.authenticate(setup.account_a)
-    resp = replay.select_by_id(
-        setup.account_a, setup.seed.table, setup.seed.id, id_column=setup.seed.id_column
-    )
+    try:
+        replay.authenticate(setup.account_a)
+        resp = replay.select_by_id(
+            setup.account_a, setup.seed.table, setup.seed.id, id_column=setup.seed.id_column
+        )
+    except httpx.HTTPError as exc:
+        return False, f"Account {setup.account_a.label}'s own read failed after the fix: {exc}"
     rows = replay.rows(resp)
     got_own = resp.status_code == 200 and any(
         str(r.get(setup.seed.id_column)) == str(setup.seed.id) for r in rows

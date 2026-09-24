@@ -11,6 +11,7 @@ from tainted import analyze as core_analyze
 from tainted import fix as core_fix
 from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target  # noqa: F401
+from tainted.fix.paths import edit_target
 from tainted.llm.gemini import get_default_client
 from tainted.models import Check, FindingStatus, Severity
 from tainted.report import build_report, select_candidate
@@ -207,11 +208,24 @@ def fix(
     console.print(f"[dim]{_e(result_fix.notes)}[/dim]")
 
     if apply:
+        # A new file (a migration, a manifest) is written whole. An edit with an `original` is
+        # a snippet meant to replace part of an existing file; written over that file it
+        # replaced the whole handler with a few lines, so it lands beside it instead, as
+        # `<file>.tainted-fix`, for you to splice. Paths are refused if they leave the repo.
         for edit in result_fix.edits:
-            path = repo / edit.file
+            try:
+                path = edit_target(repo, edit)
+            except ValueError as exc:
+                console.print(f"[red]{_e(exc)}[/red]", soft_wrap=True)
+                raise typer.Exit(code=2)
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(edit.replacement, encoding="utf-8")
-            console.print(f"[green]wrote {_e(path)}[/green]", soft_wrap=True)
+            verb = (
+                "wrote"
+                if not edit.original
+                else f"wrote the fix for {_e(edit.file)} beside it at"
+            )
+            console.print(f"[green]{verb} {_e(path)}[/green]", soft_wrap=True)
 
     if result_fix.assertions:
         render_reverification(result_fix)

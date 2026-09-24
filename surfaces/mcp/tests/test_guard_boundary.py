@@ -41,8 +41,11 @@ def test_the_plan_is_bounded_and_names_the_target():
     plan = build_probe_plan(setup())
     assert plan.target_url == "http://localhost:54321"
     # `prove` has no legitimate dynamism, which is why pre-commitment works here at all.
-    assert 0 < len(plan.allowed) <= 4
-    assert all(c.tool in ("GET", "POST") for c in plan.allowed)
+    assert 0 < len(plan.allowed) <= 9
+    assert all(
+        c.tool in ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
+        for c in plan.allowed
+    )
 
 
 def test_a_plan_permits_the_probes_and_refuses_anything_else():
@@ -51,8 +54,18 @@ def test_a_plan_permits_the_probes_and_refuses_anything_else():
     assert plan.permits("POST", {"url": "http://localhost:54321/auth/v1/token"})
     # Exfiltration to a host the plan never named.
     assert not plan.permits("GET", {"url": "https://attacker.test/collect"})
-    # A write to the target: reading is in the plan, mutating never was.
+    # A write to the database directly: prove reads PostgREST, it never mutates it.
     assert not plan.permits("DELETE", {"url": "http://localhost:54321/rest/v1/invoices"})
+    assert not plan.permits("POST", {"url": "http://localhost:54321/auth/v1/signup"})
+
+
+def test_a_plan_commits_the_method_of_a_write_route():
+    """A BOLA candidate on a DELETE route is probed with DELETE. Committing GET alone refused
+    that probe and aborted the whole run as if the guard had caught an exfiltration."""
+    plan = build_probe_plan(setup(url="http://localhost:3000"))
+    for method in ("POST", "PUT", "PATCH", "DELETE"):
+        assert plan.permits(method, {"url": "http://localhost:3000/api/invoices/1043"})
+    assert not plan.permits("DELETE", {"url": "https://attacker.test/api/invoices/1043"})
 
 
 # --------------------------------------------------------------------------- #

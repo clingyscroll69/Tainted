@@ -63,7 +63,7 @@ def _scan_signatures(repo_path: str, needles: tuple[str, ...]) -> list[str]:
     for path in root.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in exts:
             continue
-        if any(part in _SKIP_DIRS for part in path.parts):
+        if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="replace").lower()
@@ -144,8 +144,11 @@ def _rung2_llm(
     except LLMUnavailable:
         return None
     verdict = answer.get("answer", "inconclusive")
-    conf = float(answer.get("confidence", 0.5))
-    rationale = answer.get("rationale", "")
+    try:
+        conf = min(1.0, max(0.0, float(answer.get("confidence", 0.5))))
+    except (TypeError, ValueError):
+        conf = 0.5
+    rationale = str(answer.get("rationale", ""))
     prov = Provenance(origin=Register.MEANING, rung=2, detail="the model read the code")
 
     if verdict == "no":
@@ -176,7 +179,7 @@ def _gather_evidence(repo_path: str, max_chars: int = 12000) -> str:
     for path in root.rglob("*"):
         if not path.is_file() or path.suffix.lower() not in (".ts", ".js", ".py", ".sql", ".json"):
             continue
-        if any(part in _SKIP_DIRS for part in path.parts):
+        if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
             continue
         if not any(k in str(path).lower() for k in interesting):
             continue

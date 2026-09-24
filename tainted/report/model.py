@@ -212,6 +212,10 @@ def _coverage(analysis: AnalysisResult, findings: list[Finding]) -> list[Coverag
             )
         )
 
+    # A pass that failed says so. Its absence from the candidates is not a clean result.
+    for gap in analysis.gaps:
+        notes.append(CoverageNote(check=gap.check, proved=False, detail=gap.detail))
+
     coded = [
         f
         for f in findings

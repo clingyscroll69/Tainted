@@ -586,7 +586,7 @@ def _candidate_files(root: Path, exclude: Sequence[str] = ()) -> Iterable[Path]:
     for path in root.rglob("*"):
         if not path.is_file():
             continue
-        if any(part in _SKIP_DIRS for part in path.parts):
+        if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
             continue
         if exclude and is_excluded(str(path.relative_to(root)), exclude):
             continue

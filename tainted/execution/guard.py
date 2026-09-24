@@ -63,8 +63,25 @@ def build_probe_plan(setup: ProveSetup) -> ProbePlan:
             AllowedCall(tool="GET", arg_constraints={"url": f"re:{_esc(base)}/rest/v1/.*"}),
             # The app's own routes, for route-discovered BOLA findings.
             AllowedCall(tool="GET", arg_constraints={"url": f"re:{_esc(app)}/.*"}),
+            # The same routes in every other method route discovery can name. A candidate on a
+            # POST or DELETE route is probed with that method; committing GET alone refused
+            # those probes and aborted the whole run as though the guard had caught an
+            # exfiltration. Writes stay off PostgREST and GoTrue even when the app and the
+            # database share a base URL: prove reads the database, it never writes to it.
+            *(
+                AllowedCall(
+                    tool=method,
+                    arg_constraints={"url": f"re:{_esc(app)}/(?!rest/v1/|auth/v1/).*"},
+                )
+                for method in _ROUTE_WRITE_METHODS
+            ),
         ],
     )
+
+
+# Every method `tainted.static.routes` recovers beyond GET, uppercased as the prober sends it. A
+# catch-all route (`*`) is sent as GET, which the read entry above already commits.
+_ROUTE_WRITE_METHODS = ("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
 
 
 def commit_plan(plan: ProbePlan, key: bytes) -> str:

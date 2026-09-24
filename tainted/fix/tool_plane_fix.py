@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from tainted.fix.interview import ToolRemediation
+from tainted.fix.paths import safe_segment
 from tainted.models import Candidate, FileEdit
 
 
@@ -37,7 +38,8 @@ def _names(candidate: Candidate) -> tuple[str, list[str], list[str]]:
 
 def _manifest_path(candidate: Candidate, suffix: str) -> str:
     scope, _, _ = _names(candidate)
-    return f"tainted-fix/{scope}.{suffix}.json"
+    # The scope name is whatever the manifest called itself; as a path it is one segment.
+    return f"tainted-fix/{safe_segment(scope)}.{suffix}.json"
 
 
 def _dump(obj: Any) -> str:

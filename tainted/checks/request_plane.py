@@ -121,10 +121,20 @@ def _classify_table(table: TableModel, schema_present: bool = True) -> Optional[
             metadata=base_meta,
         )
 
-    # Case 2 — RLS enabled but no SELECT policy references the owner (permissive or absent).
-    permissive = [p for p in table.select_policies if p.is_permissive_true]
+    # Case 2 — a permissive `true` SELECT policy that reaches a browser's role. Postgres ORs
+    # permissive policies together, so an owner-scoped policy beside it restricts nothing: the
+    # `true` one alone lets every row through. Only a *restrictive* owner-scoped policy, which
+    # is ANDed with the rest, still bounds the read.
+    permissive = [
+        p
+        for p in table.select_policies
+        if p.is_permissive_true and not p.restrictive and p.reaches_clients
+    ]
+    bounded = [
+        p for p in table.select_policies if p.restrictive and p.references_auth_uid
+    ]
     owner_scoped = [p for p in table.select_policies if p.references_auth_uid]
-    if permissive and not owner_scoped:
+    if permissive and not bounded:
         pol = permissive[0]
         return Candidate(
             check=Check.RLS,
@@ -133,6 +143,13 @@ def _classify_table(table: TableModel, schema_present: bool = True) -> Optional[
             description=(
                 f"`{table.name}` has RLS enabled, but its SELECT policy \"{pol.name}\" uses "
                 f"`using (true)`. Every caller passes. That is equivalent to no protection."
+                + (
+                    f" The owner-scoped policy \"{owner_scoped[0].name}\" does not help: "
+                    f"Postgres combines permissive policies with OR, so a row passes if any "
+                    f"one of them allows it."
+                    if owner_scoped
+                    else ""
+                )
             ),
             location=SourceLocation(file=pol.source_file, line=pol.line),
             source="browser (anon key)",

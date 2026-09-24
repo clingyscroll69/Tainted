@@ -1,6 +1,6 @@
 """Gemini implementation of the LLMClient interface (google-genai SDK).
 
-Judge tier -> gemini-2.5-pro; bulk tier -> gemini-2.5-flash. Both overridable via settings.
+Judge tier -> `gemini-pro-latest`; bulk tier -> `gemini-flash-latest`. Both overridable via settings.
 Responses are constrained to JSON with a schema so the engine gets parseable output.
 """
 
@@ -10,7 +10,7 @@ import json
 from typing import Any, Optional
 
 from tainted.config import Settings, get_settings
-from tainted.llm.client import LLMClient, LLMTier
+from tainted.llm.client import LLMCallFailed, LLMClient, LLMTier
 
 
 class GeminiClient(LLMClient):
@@ -55,7 +55,7 @@ class GeminiClient(LLMClient):
         model = self._model_for(tier)
         try:
             return self._call(model=model, system=system, prompt=prompt, schema=schema)
-        except Exception:
+        except Exception as exc:
             # Judge model unavailable (quota / sunset id) -> degrade to bulk rather than fail.
             fallback = self._settings.tainted_llm_model_bulk
             if (
@@ -63,10 +63,16 @@ class GeminiClient(LLMClient):
                 and self._settings.llm_judge_falls_back_to_bulk
                 and fallback != model
             ):
-                return self._call(
-                    model=fallback, system=system, prompt=prompt, schema=schema
-                )
-            raise
+                try:
+                    return self._call(
+                        model=fallback, system=system, prompt=prompt, schema=schema
+                    )
+                except Exception as fallback_exc:
+                    raise LLMCallFailed(
+                        f"{model} and fallback {fallback} both failed: "
+                        f"{type(fallback_exc).__name__}: {fallback_exc}"
+                    ) from fallback_exc
+            raise LLMCallFailed(f"{model} failed: {type(exc).__name__}: {exc}") from exc
 
     # Transient server errors (503 high-demand, 500) recover in seconds; quota (429) and
     # sunset ids (404) do not, and are left to the judge->bulk fallback / caller.

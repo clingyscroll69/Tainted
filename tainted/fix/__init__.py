@@ -21,6 +21,7 @@ from tainted.fix.interview import (
     resolve_tool_plane_fix,
     tool_plane_interview,
 )
+from tainted.fix.paths import edit_target, safe_segment
 from tainted.fix.reverify import reverify_request_plane, reverify_tool_plane
 from tainted.fix.tool_plane_fix import generate_tool_plane_fix
 
@@ -29,6 +30,8 @@ __all__ = [
     "generate_injection_fix",
     "generate_rls_fix",
     "generate_tool_plane_fix",
+    "edit_target",
+    "safe_segment",
     "reverify_request_plane",
     "reverify_tool_plane",
     "tool_plane_interview",

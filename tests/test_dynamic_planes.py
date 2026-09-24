@@ -113,7 +113,8 @@ def test_route_bola_without_a_seed_says_what_is_missing():
     prober = RouteProber(make_setup(seed=None), client=client)
     finding = prober.prove_route_bola(bola_candidate())
 
-    assert finding.status == FindingStatus.NOT_REPRODUCED
+    # Nothing was requested, so this is not an attack that held.
+    assert finding.status == FindingStatus.REPORTED
     assert "No seed record" in finding.proof.notes
 
 

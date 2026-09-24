@@ -59,11 +59,14 @@ def setup(**overrides) -> ProveSetup:
 
 
 def candidate(check: Check, **meta) -> Candidate:
+    # An agent candidate sits on its scope's own file, as `analyze_tool_plane` builds it; the
+    # scope is found by name and file together.
+    file = f"{meta.get('scope')}.mcp.json" if check is Check.AGENT_INJECTION else "x.ts"
     return Candidate(
         check=check,
         plane=Plane.TOOL if check is Check.AGENT_INJECTION else Plane.REQUEST,
         title=f"{check.value} candidate",
-        location=SourceLocation(file="x.ts", line=1),
+        location=SourceLocation(file=file, line=1),
         metadata=meta,
     )
 
@@ -159,7 +162,7 @@ def test_tool_plane_without_a_model_is_reported_not_quietly_passed():
     assert "No LLM configured" in finding.proof.notes
 
 
-def test_a_scope_that_no_longer_exists_is_not_reproduced():
+def test_a_scope_that_no_longer_exists_is_reported_not_held():
     analysis = AnalysisResult(
         repo_path=CONFIGS,
         candidates=[candidate(Check.AGENT_INJECTION, scope="deleted_agent")],
@@ -169,7 +172,8 @@ def test_a_scope_that_no_longer_exists_is_not_reproduced():
         analysis, setup(), llm=llm, driver=TurnedDriver(), replay=_dead_replay(),
         prober=_dead_prober(),
     )[0]
-    assert finding.status is FindingStatus.NOT_REPRODUCED
+    # No agent was stood up, so nothing resisted: NOT_REPRODUCED would claim an attack held.
+    assert finding.status is FindingStatus.REPORTED
     assert "not found" in finding.proof.notes
 
 

@@ -159,7 +159,7 @@ def scan_classic_injection(repo_path: str, exclude: Sequence[str] = ()) -> list[
     for path in root.rglob("*"):
         if not path.is_file() or path.suffix not in exts:
             continue
-        if any(part in _SKIP_DIRS for part in path.parts):
+        if any(part in _SKIP_DIRS for part in path.relative_to(root).parts):
             continue
         rel = str(path.relative_to(root))
         if exclude and is_excluded(rel, exclude):

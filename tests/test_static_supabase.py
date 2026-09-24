@@ -103,3 +103,59 @@ def test_rank_is_order_only_never_drops(vuln_repo, fake_llm):
     assert len(ranked) == before  # membership unchanged
     # Structural holes are scored 1.0 without consulting the model.
     assert all(c.rank_score == 1.0 for c in ranked if c.structural)
+
+
+# --------------------------------------------------------------------------- #
+# Permissive policies are ORed
+# --------------------------------------------------------------------------- #
+def _audited(sql: str):
+    model = SupabaseModel()
+    parse_migration_sql(sql, "m.sql", model)
+    for table in model.tables.values():
+        table.client_read = True
+    return {c.metadata["table"]: c for c in audit_rls(model)}
+
+
+def test_a_true_policy_beside_an_owner_policy_is_still_a_hole():
+    """Postgres ORs permissive policies: the `true` one lets every row through on its own."""
+    found = _audited(
+        """
+        create table notes (id uuid, user_id uuid);
+        alter table if exists notes enable row level security;
+        create policy "own" on notes for select using (auth.uid() = user_id);
+        create policy "everyone" on notes for select using (true);
+        """
+    )
+    assert found["notes"].severity is Severity.CRITICAL
+    assert "combines permissive policies with OR" in found["notes"].description
+
+
+def test_a_restrictive_owner_policy_bounds_a_true_one():
+    found = _audited(
+        """
+        create table notes (id uuid, user_id uuid);
+        alter table notes enable row level security;
+        create policy "everyone" on notes for select using (true);
+        create policy "own" on notes as restrictive for select using (auth.uid() = user_id);
+        """
+    )
+    assert "notes" not in found
+
+
+def test_a_true_policy_for_the_service_role_only_exposes_nothing_to_a_browser():
+    found = _audited(
+        """
+        create table audit (id int);
+        alter table audit enable row level security;
+        create policy "svc" on audit for select to service_role using (true);
+        """
+    )
+    assert "audit" not in found
+
+
+def test_enable_rls_if_exists_is_read_as_enabled():
+    model = SupabaseModel()
+    parse_migration_sql(
+        "alter table if exists public.invoices enable row level security;", "m.sql", model
+    )
+    assert model.tables["invoices"].rls_enabled

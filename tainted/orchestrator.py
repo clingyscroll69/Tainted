@@ -14,7 +14,7 @@ from tainted.checks.classic_injection import scan_classic_injection
 from tainted.checks.request_plane import analyze_request_plane
 from tainted.checks.test_integrity import CommandRunner, measure_test_integrity
 from tainted.checks.tool_plane import analyze_tool_plane
-from tainted.dynamic.agent_driver import AgentDriver, build_driver
+from tainted.dynamic.agent_driver import AgentDriver, AgentDriverError, build_driver
 from tainted.dynamic.injection_probes import prove_sql_injection
 from tainted.dynamic.probes import prove_candidate
 from tainted.dynamic.replay import SupabaseReplay
@@ -27,6 +27,7 @@ from tainted.fix.reverify import reverify_request_plane, reverify_tool_plane
 from tainted.fix.tool_plane_fix import generate_tool_plane_fix
 from tainted.llm.client import LLMClient, LLMUnavailable
 from tainted.models import (
+    AnalysisGap,
     AnalysisResult,
     ApplicabilityDecision,
     Candidate,
@@ -112,12 +113,27 @@ def analyze(
     # What the model filtered out travels with the result, so the report can say a scope was
     # dropped rather than look identical to a repository that never had one.
     filtered_scopes: list[FilteredScope] = []
+    gaps: list[AnalysisGap] = []
     if tool_decision.applies and Check.AGENT_INJECTION in active:
-        candidates.extend(
-            analyze_tool_plane(
-                repo_path, llm=llm, dropped=filtered_scopes, exclude=exclude
+        try:
+            candidates.extend(
+                analyze_tool_plane(
+                    repo_path, llm=llm, dropped=filtered_scopes, exclude=exclude
+                )
             )
-        )
+        except LLMUnavailable as exc:
+            # Labelling is the only way a tool becomes a source or a sink, so a model that
+            # fails mid-pass leaves nothing to pair. Recorded rather than raised: the request
+            # plane's candidates are already in hand and are no less real for this.
+            gaps.append(
+                AnalysisGap(
+                    check=Check.AGENT_INJECTION,
+                    detail=(
+                        "The model failed while labelling agent tools, so no agent scope was "
+                        f"analyzed and none was ruled out. ({exc})"
+                    ),
+                )
+            )
 
     # Test integrity — a codebase-level measurement, not a plane, so no applicability gate.
     # It is opt-in by cost, not by relevance: a mutation campaign is minutes, not milliseconds.
@@ -134,6 +150,7 @@ def analyze(
         applicability=decisions,
         mutation=mutation,
         filtered_scopes=filtered_scopes,
+        gaps=gaps,
     )
 
 
@@ -285,9 +302,10 @@ def _prove_tool_plane(
     """Stand the configured agent up from its manifest and try to turn it."""
     scope = _scope_for(candidate, scopes)
     if scope is None:
+        # REPORTED, not NOT_REPRODUCED: no agent was stood up, so nothing resisted anything.
         return Finding(
             candidate=candidate,
-            status=FindingStatus.NOT_REPRODUCED,
+            status=FindingStatus.REPORTED,
             proof=ProbeResult(
                 succeeded=False,
                 kind="agent_injection",
@@ -326,13 +344,25 @@ def _prove_tool_plane(
     except LLMUnavailable:
         return _unprovable(candidate, "LLM unavailable. No injection was generated.")
 
-    return run_sandbox(candidate, scope, injection, driver)
+    # The driver raises rather than return no calls when a turn fails, because "no calls" would
+    # read as an agent that resisted. That refusal has to land here as an unproven finding: left
+    # to propagate, one failed model turn aborted the whole run and every finding after it.
+    try:
+        return run_sandbox(candidate, scope, injection, driver)
+    except (LLMUnavailable, AgentDriverError) as exc:
+        return _unprovable(candidate, f"The sandbox could not drive the agent: {exc}")
 
 
 def _scope_for(candidate: Candidate, scopes: list[AgentScope]) -> Optional[AgentScope]:
+    """The scope a candidate names, by name *and* file.
+
+    A name alone is not unique: a coded scope is named after its file's stem, so two
+    `agent.py` files in different folders both yield `agent`, and two manifests may share a
+    `name`. Matching on the name only proved whichever came first under the other's title.
+    """
     name = candidate.metadata.get("scope")
     for scope in scopes:
-        if scope.name == name:
+        if scope.name == name and scope.source_file == candidate.location.file:
             return scope
     return None
 

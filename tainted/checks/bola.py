@@ -123,7 +123,10 @@ def judge_bola_candidates(candidates: list[Candidate], llm: LLMClient) -> list[C
             )
         except LLMUnavailable:
             return candidates
-        likelihood = float(verdict.get("likelihood", 0.5))
+        try:
+            likelihood = min(1.0, max(0.0, float(verdict.get("likelihood", 0.5))))
+        except (TypeError, ValueError):
+            likelihood = 0.5
         is_ref = bool(verdict.get("is_object_reference", True))
         checked = bool(verdict.get("ownership_check_present", False))
         # If the model sees an owner check the parser missed, it pushes the candidate down the
@@ -133,7 +136,7 @@ def judge_bola_candidates(candidates: list[Candidate], llm: LLMClient) -> list[C
         cand.provenance.append(
             Provenance(
                 origin=Register.MEANING,
-                detail=f"LLM ownership judgment (order only): {verdict.get('rationale', '')[:200]}",
+                detail=f"LLM ownership judgment (order only): {str(verdict.get('rationale', ''))[:200]}",
             )
         )
     return candidates

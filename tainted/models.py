@@ -296,6 +296,18 @@ class FilteredScope(BaseModel):
     rationale: str = ""
 
 
+class AnalysisGap(BaseModel):
+    """A pass that should have run and could not, and why.
+
+    Distinct from a plane applicability skipped: that is a decision, this is a failure. A
+    tool-plane pass whose labelling call failed returns no candidates, and without this record
+    its report is indistinguishable from one for a repository with no agents at all.
+    """
+
+    check: Check
+    detail: str
+
+
 class AnalysisResult(BaseModel):
     """The output of `analyze`: candidates plus the applicability decisions behind them."""
 
@@ -314,6 +326,7 @@ class AnalysisResult(BaseModel):
     # everything, which is the product's standing rule about proof strength applied to the
     # filter itself.
     filtered_scopes: list[FilteredScope] = Field(default_factory=list)
+    gaps: list[AnalysisGap] = Field(default_factory=list)
 
     def by_check(self, check: Check) -> list[Candidate]:
         return [c for c in self.candidates if c.check == check]

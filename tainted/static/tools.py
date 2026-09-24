@@ -384,7 +384,9 @@ def discover_scopes(repo_path: str, exclude: Sequence[str] = ()) -> list[AgentSc
     scopes: list[AgentScope] = []
 
     for path in root.rglob("*"):
-        if not path.is_file() or any(part in _SKIP_DIRS for part in path.parts):
+        if not path.is_file() or any(
+            part in _SKIP_DIRS for part in path.relative_to(root).parts
+        ):
             continue
         rel = str(path.relative_to(root))
         if exclude and is_excluded(rel, exclude):
