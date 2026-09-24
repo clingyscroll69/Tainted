@@ -132,3 +132,40 @@ def render_next_steps(gap: str) -> str:
         "<sub>Set <code>TAINTED_TUTORIAL=1</code> on this job to print the full "
         "walkthrough.</sub>\n</details>"
     )
+
+
+def render_invariants(report) -> str:
+    """The rules this repository states about itself, and what happened when they were fired.
+
+    `not_tested` is rendered in its own row with its reason rather than folded in with the rules
+    that held, because a rule nobody could aim a request at tells a reviewer nothing about the
+    code and everything about the setup.
+    """
+    lines = ["### Stated rules", ""]
+    icons = {"violated": "❌", "held": "✅", "not_tested": "◻️"}
+    for r in report.results:
+        lines.append(f"- {icons[r.verdict.value]} **{r.verdict.value}** — {r.rule}")
+        lines.append(f"  <br><sub>{r.detail}</sub>")
+    lines += ["", f"<sub>{report.as_dict()['headline']} {report.as_dict()['reminder']}</sub>"]
+    return "\n".join(lines)
+
+
+def render_lockout(result) -> str:
+    """Whether the owner still reaches their own data after this change.
+
+    Nothing-checked is printed as its own state. A lockout run that could not decide anything is
+    the one result a reader must not skim as a pass.
+    """
+    lines = ["### Owner access", ""]
+    if not result.checked:
+        lines.append("◻️ **Not checked.** This is not a pass.")
+        for row in result.undecided:
+            lines.append(f"  <br><sub>{row['resource']}: {row['reason']}</sub>")
+        return "\n".join(lines)
+    for c in result.checked:
+        icon = "❌" if c.owner_locked_out else "✅"
+        state = "locked out" if c.owner_locked_out else "reachable"
+        lines.append(f"- {icon} **{state}** — `{c.resource}` via {c.via}")
+        lines.append(f"  <br><sub>{c.detail}</sub>")
+    lines += ["", f"<sub>{result.as_dict()['detail']}</sub>"]
+    return "\n".join(lines)

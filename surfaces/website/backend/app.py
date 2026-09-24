@@ -214,6 +214,28 @@ class ProveRequest(RepoSelector):
         return v
 
 
+class InvariantsRequest(ProveRequest):
+    """A prove request that also carries the rules to fire.
+
+    It inherits `ProveRequest` rather than `RepoSelector` because firing a rule *is* proving —
+    the same live requests at the same target, and therefore the same ownership gate. A separate
+    model would have been a second door onto the same capability, with its own chance of
+    forgetting the gate.
+    """
+
+    rules: list[str] = []
+
+
+class LockoutRequest(ProveRequest):
+    """A prove request aimed at the owner instead of the attacker.
+
+    Account A is the one that matters here, and `route` names the door the owner actually uses,
+    so a refusal through the app's own route is told apart from one through PostgREST.
+    """
+
+    route: Optional[str] = None
+
+
 class FixRequest(RepoSelector):
     # Which hole to fix. `finding_id` is the handle a client should send: it names the hole
     # itself, so it cannot drift. `index` is the older positional form, kept working for one
@@ -435,6 +457,69 @@ def api_ledger(req: AnalyzeRequest, request: Request):
     with _checkout(req, request) as repo_path:
         report = _executor.analyze(repo_path)
     return JSONResponse(silence_ledger(report))
+
+
+@app.post("/api/receipt")
+def api_receipt(req: AnalyzeRequest, request: Request):
+    """A receipt for this analysis: what fired, what worked, and what was never tried.
+
+    Unsigned here by design. Signing is an attestation by whoever holds the key, and this server
+    holding one would mean it was attesting on the user's behalf to a run it performed for them —
+    a claim nobody asked it to make. The payload is canonical and carries its own digest, so the
+    caller signs it with their own key if they want an attestation.
+    """
+    from tainted.receipt import build_receipt
+
+    if demo_mode.is_demo(req.repo_path, req.repo):
+        report = demo_mode.demo_analyze_report()
+    else:
+        with _checkout(req, request) as repo_path:
+            report = _executor.analyze(repo_path)
+    rec = build_receipt(report)
+    out = rec.as_dict()
+    out["unsigned"] = (
+        "This receipt is not signed. Sign the canonical payload with your own key to make it an "
+        "attestation; until then it is a report."
+    )
+    return JSONResponse(out)
+
+
+@app.post("/api/invariants")
+def api_invariants(req: InvariantsRequest, request: Request):
+    """Fire rules written in plain English at the running target.
+
+    Ownership-gated exactly like `/api/prove`, because it does exactly what prove does.
+    """
+    rules = [r.strip() for r in (req.rules or []) if r and r.strip()]
+    if not rules:
+        raise HTTPException(422, "No rules given. Send at least one rule in plain English.")
+    if not req.url:
+        raise HTTPException(422, "A target URL is required: rules are tested by firing at them.")
+
+    from tainted.invariants import check_invariants
+
+    setup = _build_setup(req)
+    _gate_ownership(req, request, setup)
+    with _checkout(req, request) as repo_path:
+        report = check_invariants(
+            rules, repo_path, setup, llm=_llm_or_none(), ownership_verified=True
+        )
+    return JSONResponse(report.as_dict())
+
+
+@app.post("/api/lockout")
+def api_lockout(req: LockoutRequest, request: Request):
+    """Whether the owner still reaches their own data — the opposite failure from a hole."""
+    if not req.url:
+        raise HTTPException(422, "A target URL is required.")
+
+    from tainted import lockout_check
+
+    setup = _build_setup(req)
+    if req.route and setup.seed is not None:
+        setup.seed.route_path = req.route
+    _gate_ownership(req, request, setup)
+    return JSONResponse(lockout_check(setup, ownership_verified=True).as_dict())
 
 
 # --------------------------------------------------------------------------- #

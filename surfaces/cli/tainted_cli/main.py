@@ -9,6 +9,8 @@ import typer
 
 from tainted import analyze as core_analyze
 from tainted import fix as core_fix
+from tainted import lockout_check as core_lockout
+from tainted.invariants import check_invariants as core_invariants
 from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target  # noqa: F401
 from tainted.llm.gemini import get_default_client
@@ -365,6 +367,88 @@ def ledger(
     for row in led["not_proved"]:
         console.print(f"  [yellow]not fully proven:[/yellow] {_e(row['check'])} — {_e(row['detail'])}")
     console.print(f"\n[dim]{_e(led['reminder'])}[/dim]")
+
+
+@app.command()
+def lockout(
+    url: str = typer.Option(..., help="Base URL of the running app"),
+    login_a: str = typer.Option(..., "--login-a", help="email:password for the owner"),
+    seed: str = typer.Option(..., help="table:id of a record the owner owns"),
+    route: Optional[str] = typer.Option(None, help="The route that serves it, e.g. /api/invoices/[id]"),
+    anon_key: Optional[str] = typer.Option(None, help="Supabase anon key, if the app uses one"),
+):
+    """Check whether your security locked out your own users.
+
+    The opposite failure from a vulnerability, and the one nothing else reports. A policy that
+    blocks the attack and also blocks the owner is secure and broken, and this asks that question
+    on its own — no finding required, any time you like.
+    """
+    setup = _build_setup(url, login_a, login_a, seed, anon_key)
+    if route and setup.seed:
+        setup.seed.route_path = route
+    result = core_lockout(setup)
+
+    if not result.checked:
+        console.print("[yellow]Nothing was tested.[/yellow] This is not a pass.")
+        for row in result.undecided:
+            console.print(f"  [dim]{_e(row['resource'])}:[/dim] {_e(row['reason'])}")
+        raise typer.Exit(code=2)
+
+    for c in result.checked:
+        tag = "[red]locked out[/red]" if c.owner_locked_out else "[green]reachable[/green]"
+        console.print(f"  {tag} {_e(c.resource)} [dim]via {_e(c.via)}[/dim] — {_e(c.detail)}")
+    console.print(f"\n[bold]{_e(result.as_dict()['detail'])}[/bold]")
+    if result.locked_out:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def invariants(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    rule: list[str] = typer.Option(..., "--rule", help="A rule in plain English. Repeatable."),
+    url: str = typer.Option(..., help="Base URL of the running app"),
+    login_b: str = typer.Option(..., "--login-b", help="email:password for the attacking account"),
+    seed: Optional[str] = typer.Option(None, help="table:id of a record to aim at"),
+    anon_key: Optional[str] = typer.Option(None, help="Supabase anon key, if the app uses one"),
+):
+    """Test rules you write in plain English against the running app.
+
+    Each rule comes back violated, held, or NOT TESTED — and the third one is the point. A rule
+    Tainted could not build an attack for is not a rule that held, so it is never reported as one.
+    """
+    setup = _build_setup(url, login_b, login_b, seed, anon_key)
+    report = core_invariants(list(rule), str(repo), setup, llm=_llm_or_none())
+
+    for r in report.results:
+        colour = {"violated": "red", "held": "green", "not_tested": "yellow"}[r.verdict.value]
+        console.print(f"  [{colour}]{_e(r.verdict.value)}[/{colour}] {_e(r.rule)}")
+        console.print(f"    [dim]{_e(r.detail)}[/dim]")
+    console.print(f"\n[bold]{_e(report.as_dict()['headline'])}[/bold]")
+    console.print(f"[dim]{_e(report.as_dict()['reminder'])}[/dim]")
+    if report.violated:
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def receipt(
+    repo: Path = typer.Argument(..., exists=True, file_okay=False),
+    secret: Optional[str] = typer.Option(
+        None, envvar="TAINTED_RECEIPT_SECRET", help="Signing key. Without one the receipt is unsigned."
+    ),
+):
+    """Emit a signed receipt: what was fired, what worked, and what was never tried.
+
+    The signature covers the untested surface as well as the findings, so the admissions cannot be
+    deleted from a document that still verifies. Prints JSON to stdout.
+    """
+    import json as _json
+
+    from tainted.receipt import build_receipt, sign as _sign
+
+    result = core_analyze(str(repo), llm=_llm_or_none())
+    rec = build_receipt(build_report(result))
+    signature = _sign(rec, secret.encode("utf-8")) if secret else None
+    typer.echo(_json.dumps(rec.as_dict(signature), indent=2))
 
 
 @app.command()

@@ -13,6 +13,7 @@ here so the orchestrator stays the three-operation spine and every surface impor
                          "attack closed AND nothing else broke" (A7).
   * `pairing_diff`     — the new source+sink co-locations a change introduced (B5).
   * `completion_gate`  — a pass/block verdict for a coding agent: no new PROVEN hole (B8).
+  * `lockout_check`    — the inverse question, asked on its own: did the policy stop the *owner*?
 """
 
 from __future__ import annotations
@@ -458,3 +459,137 @@ def completion_gate(findings: list[Finding], fail_on: Severity = Severity.HIGH) 
             ),
         )
     return GateResult(passed=True, detail="No proven hole at or above the threshold.")
+
+
+# --------------------------------------------------------------------------- #
+# Lockout — the inverse question, asked on its own
+# --------------------------------------------------------------------------- #
+@dataclass
+class LockoutFinding:
+    """One resource the legitimate owner can no longer reach."""
+
+    resource: str  # the route or table the owner was tested against
+    via: str  # "route" | "postgrest"
+    owner_locked_out: bool
+    detail: str
+
+    def as_dict(self) -> dict:
+        return {
+            "resource": self.resource,
+            "via": self.via,
+            "owner_locked_out": self.owner_locked_out,
+            "detail": self.detail,
+        }
+
+
+@dataclass
+class LockoutResult:
+    """Whether the owner still reaches their own data, and what could not be decided.
+
+    `checked` and `undecided` are kept apart deliberately. A resource nobody could test is not a
+    resource that passed, and folding the two together would turn a setup problem into a clean
+    bill of health — the same mistake the coverage ledger exists to prevent, in miniature.
+    """
+
+    checked: list[LockoutFinding] = field(default_factory=list)
+    undecided: list[dict] = field(default_factory=list)
+
+    @property
+    def locked_out(self) -> list[LockoutFinding]:
+        return [c for c in self.checked if c.owner_locked_out]
+
+    @property
+    def ok(self) -> bool:
+        """True only when something was actually tested and nothing was locked out."""
+        return bool(self.checked) and not self.locked_out
+
+    def as_dict(self) -> dict:
+        return {
+            "ok": self.ok,
+            "locked_out": [c.as_dict() for c in self.locked_out],
+            "checked": [c.as_dict() for c in self.checked],
+            "undecided": self.undecided,
+            "detail": self._detail(),
+        }
+
+    def _detail(self) -> str:
+        if not self.checked:
+            return (
+                "Nothing was tested, so this says nothing about whether your users can reach "
+                "their own data. It is not a pass."
+            )
+        if self.locked_out:
+            return (
+                f"{len(self.locked_out)} resource(s) the owner can no longer reach. Secure and "
+                f"broken are not the same result, and this is the second one."
+            )
+        return f"The owner still reaches all {len(self.checked)} tested resource(s)."
+
+
+def lockout_check(
+    setup: ProveSetup,
+    ownership_verified: bool = False,
+    prober: Optional[RouteProber] = None,
+    replay: Optional[SupabaseReplay] = None,
+) -> LockoutResult:
+    """Ask, on its own, whether the authorization policy locked out the legitimate owner.
+
+    Tainted already asks this inside the fix loop, where it separates FIXED from
+    BROKE_IT_SAFELY. But the question outlives the fix that raised it: a policy tightened by
+    hand, by a migration, or by somebody else's autofix can lock real users out of their own
+    data, and there is no finding to hang that check on. So this is the same assertion, decoupled
+    — run it any time, against any target, with no prior finding required.
+
+    It is the positive control run for its own sake: account A, reading A's own record, through
+    the same door the app gives everyone else. A failure here is not a vulnerability and is never
+    reported as one. It is the opposite failure, and it is the one no scanner reports at all.
+    """
+    result = LockoutResult()
+
+    if not setup.target.is_local and not ownership_verified:
+        result.undecided.append(
+            {
+                "resource": setup.target.url,
+                "reason": "non-local target without verified ownership — refused to touch it",
+            }
+        )
+        return result
+
+    seed = setup.seed
+    if seed is None:
+        result.undecided.append(
+            {
+                "resource": setup.target.url,
+                "reason": (
+                    "No seed record. Without one record known to belong to account A, a refusal "
+                    "cannot be told apart from a record that never existed."
+                ),
+            }
+        )
+        return result
+
+    if not (setup.account_a.email or setup.account_a.access_token):
+        result.undecided.append(
+            {
+                "resource": seed.table,
+                "reason": "No credentials for account A, so the owner's own access cannot be tried.",
+            }
+        )
+        return result
+
+    prober = prober or RouteProber(setup)
+    replay = replay or SupabaseReplay(setup.target, prober._client)
+
+    # The app's own route, when the seed names one — the door the owner actually uses.
+    if seed.route_path:
+        ok, detail = prober.legitimate_access_survives()
+        result.checked.append(
+            LockoutFinding(resource=seed.route_path, via="route", owner_locked_out=not ok, detail=detail)
+        )
+
+    # PostgREST, which on the Supabase stack is a door the browser opens directly.
+    ok, detail = _legit_via_postgrest(setup, replay)
+    result.checked.append(
+        LockoutFinding(resource=seed.table, via="postgrest", owner_locked_out=not ok, detail=detail)
+    )
+    return result

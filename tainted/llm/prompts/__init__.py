@@ -223,6 +223,43 @@ def injection_prompt(scope: dict[str, Any]) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# Invariants — a sentence the developer wrote, turned into a request to send
+# --------------------------------------------------------------------------- #
+# The model's whole job here is translation, not judgment. It never decides whether the rule
+# holds; it only proposes the request that would break it if it were breakable. The verdict comes
+# from firing that request, which is why the schema has no confidence field and no opinion field
+# — either would invite a surface to print a judgment nobody tested.
+INVARIANT_SYSTEM = (
+    "You translate a plain-English security rule about a web application into ONE concrete HTTP "
+    "request that would VIOLATE the rule if the application is vulnerable, for AUTHORIZED testing "
+    "of the owner's own app. You are given the rule and the routes the application actually "
+    "declares. Choose a route from that list; never invent one. The request is sent as the "
+    "attacking account, so assume it is authenticated as somebody who should NOT be allowed the "
+    "thing the rule forbids. State plainly what in the response would show the rule was broken. "
+    "If no declared route could violate the rule, say so by returning an empty route."
+)
+
+INVARIANT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "route_path": {"type": "string"},
+        "method": {"type": "string"},
+        "body": {"type": "string"},
+        "violation_marker": {"type": "string"},
+        "rationale": {"type": "string"},
+    },
+    "required": ["route_path", "method", "violation_marker"],
+}
+
+
+def invariant_prompt(rule: str, routes: list[dict[str, Any]]) -> str:
+    return (
+        f"Rule the application must never break:\n{rule}\n\n"
+        f"Routes the application declares:\n{_dump(routes)}"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # The agent under test (tool plane, dynamic half)
 # --------------------------------------------------------------------------- #
 # Note what is deliberately *absent* from this schema and prompt: any instruction to distrust

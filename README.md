@@ -59,6 +59,38 @@ one thing it cannot see:
 - `prove(..., budget=Budget(max_seconds=..., max_candidates=...))` — cap a run and stop
   gracefully, emitting everything proven so far and how much it did not reach.
 
+### Added since 0.2.0
+
+Six more, each a composition of the same three operations, each honest about what it cannot see:
+
+- `lockout_check(setup)` — the **opposite** failure from a hole: the attack is blocked and the
+  *owner* can no longer reach their own data. Secure and broken is still broken. Nothing checked
+  is reported as undecided, never as a pass.
+- `check_invariants(rules, repo, setup)` — rules you write in plain English ("no user should ever
+  see another user's email address"), compiled into one real request each and fired. Three
+  verdicts: **violated**, **held**, **not tested** — and the third is the point.
+- `build_receipt(report)` / `sign` / `verify_payload` — a canonical receipt of what fired, what
+  worked, and what was never tried, with the **untested surface inside the signed payload**, so
+  the admissions cannot be stripped from a document that still verifies.
+- `emit_regression_test(finding, repo)` — a proven exploit written out as a test in *your* test
+  framework (pytest / vitest / jest), asserting the attack **fails**. It imports nothing from
+  Tainted, so it keeps working after Tainted is gone. No framework detected means it refuses
+  rather than guesses.
+- `measure_exposure(findings, setup, consented=True)` — how many rows the attacking account can
+  actually reach through a proven hole, and which columns. Counted via PostgREST
+  `Prefer: count=exact`, so the total arrives in a header while the body stays at one row:
+  **counts and column names, never values.** Opt-in, and uncounted is never rendered as zero.
+- **`Check.TOOL_TENANCY`** — BOLA one layer up. Two tenants, one shared tool backend, and a
+  `get_x(id)` tool that authorizes on the identifier instead of the caller. Not gated on
+  co-location: that makes an agent *turnable*, which is a different question from whether the
+  backend checks ownership at all.
+
+Surface entry points for those: `tainted lockout|invariants|receipt` on the CLI; `tainted_lockout`,
+`tainted_invariants`, `tainted_receipt`, `tainted_regression_test` as MCP tools; `TAINTED_RECEIPT`,
+`TAINTED_RECEIPT_SECRET`, `TAINTED_INVARIANTS` and `TAINTED_LOCKOUT` in CI (a violated rule or a
+locked-out owner fails the job); and `/api/receipt`, `/api/invariants`, `/api/lockout` on the
+website, the last two behind the same ownership gate as `/api/prove`.
+
 Every report also carries three projections (`tainted.report.enrich`): a **0-100 priority**
 (severity × proof strength — a proven low outranks a reported critical), **standard ids** tiered
 `(proven)` vs `(static)` (OWASP ASI/API, MITRE ATLAS, CWE), and a **silence ledger** of what was
@@ -80,6 +112,7 @@ tools plus enriched `tainted_analyze`; `TAINTED_SARIF` and `TAINTED_DIFF_ONLY` i
 | **Classic injection** | Regex pass, confirmed by Semgrep taint | SQL injection is proven live. Command and template injection are demonstrated with a real payload but never executed |
 | **Agent injection** | Reads the tool graph across MCP, n8n, Flowise, LangChain (Python/JS), CrewAI | A configured agent is proven in a sandbox with logging-stub tools. A coded agent is reported from the code only, never run |
 | **Test integrity** | — | The mutant that survives (via Stryker / mutmut) is itself the proof |
+| **Tool tenancy** | Finds tools that fetch a record by identifier across the same tool graph | Tenant B's agent calls the shared backend for tenant A's record; only a returned record that is attributably A's counts |
 
 Every report says which checks were proven and which were only analyzed. Without that,
 a report with no proof column reads as a clean bill of health when it might just mean

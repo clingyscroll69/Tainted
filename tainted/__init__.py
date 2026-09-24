@@ -24,12 +24,17 @@ from tainted.orchestrator import OwnershipError, analyze, fix, prove
 from tainted.budget import Budget, BudgetOutcome, parse_budget
 from tainted.operations import (
     completion_gate,
+    lockout_check,
     pairing_diff,
     preflight,
     regression_check,
     reprove,
     second_opinion,
 )
+from tainted.exposure import Exposure, ExposureReport, measure_exposure
+from tainted.invariants import InvariantVerdict, check_invariants
+from tainted.receipt import Receipt, build_receipt, sign, verify, verify_payload
+from tainted.regression_test import detect_framework, emit_regression_test
 from tainted.priority import priority_of, by_priority
 from tainted.standards import ids_for
 
@@ -46,6 +51,19 @@ __all__ = [
     "preflight",
     "reprove",
     "second_opinion",
+    "lockout_check",
+    "measure_exposure",
+    "Exposure",
+    "ExposureReport",
+    "check_invariants",
+    "InvariantVerdict",
+    "build_receipt",
+    "Receipt",
+    "sign",
+    "verify",
+    "verify_payload",
+    "emit_regression_test",
+    "detect_framework",
     "regression_check",
     "pairing_diff",
     "completion_gate",

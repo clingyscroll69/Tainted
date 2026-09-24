@@ -449,6 +449,133 @@ def tainted_mutate_security(repo_path: str, exclude: str = "") -> dict:
 
 @server.tool(
     description=(
+        "Check whether an authorization policy locked out the LEGITIMATE owner — the opposite "
+        "failure from a vulnerability, and one no scanner reports. Run it after any change to "
+        "authorization, RLS, or a fix somebody else wrote. Localhost only. Needs the OWNER's "
+        "login and a record they own; ask the developer for both, never invent them. A result "
+        "with nothing checked is NOT a pass — read `undecided` and say so."
+    )
+)
+def tainted_lockout(
+    url: str, login_a: str = "", seed: str = "", route: str = "", anon_key: str = ""
+) -> dict:
+    from tainted import lockout_check
+
+    if not login_a.strip():
+        return {
+            "action_required": "ask_user",
+            "needs_credentials": ["login_a"],
+            "message": (
+                "This check signs in as the owner to confirm they can still reach their own "
+                "data. Ask the developer for that account as 'email:password'."
+            ),
+        }
+    setup = _build_setup(url, login_a, login_a, seed, anon_key)
+    if not setup.target.is_local:
+        return {"error": f"{setup.target.url} is not local — refusing.", "ok": False}
+    if route.strip() and setup.seed is not None:
+        setup.seed.route_path = route.strip()
+    return lockout_check(setup).as_dict()
+
+
+@server.tool(
+    description=(
+        "Test rules written in plain English against a running app — 'no user should ever see "
+        "another user's email address'. Each rule comes back violated, held, or NOT_TESTED. "
+        "Treat not_tested as unknown, never as safe: report it in those words. Fires real "
+        "requests as the attacking account, so localhost only, and ask the developer for that "
+        "account before calling. Pass rules separated by a newline or a pipe."
+    )
+)
+def tainted_invariants(
+    repo_path: str, rules: str, url: str, login_b: str = "", seed: str = "", anon_key: str = ""
+) -> dict:
+    from tainted.invariants import check_invariants
+
+    parsed = [r.strip() for r in rules.replace("|", "\n").split("\n") if r.strip()]
+    if not parsed:
+        return {"error": "No rules given. Pass one rule per line."}
+    if not login_b.strip():
+        return {
+            "action_required": "ask_user",
+            "needs_credentials": ["login_b"],
+            "message": (
+                "Rules are tested by sending real requests as an account that should NOT be "
+                "allowed the thing the rule forbids. Ask the developer for that login."
+            ),
+        }
+    setup = _build_setup(url, login_b, login_b, seed, anon_key)
+    if not setup.target.is_local:
+        return {"error": f"{setup.target.url} is not local — refusing."}
+    return check_invariants(parsed, repo_path, setup, llm=_llm_or_none()).as_dict()
+
+
+@server.tool(
+    description=(
+        "Read-only. A receipt for one analysis: what fired, what worked, and what was never "
+        "tried — with the untested surface INSIDE the signed payload, so it cannot be deleted "
+        "from a document that still verifies. Pass `secret` to sign it; without one the "
+        "receipt is unsigned and says so. Hand this to someone doing security diligence."
+    )
+)
+def tainted_receipt(repo_path: str, exclude: str = "", secret: str = "") -> dict:
+    from tainted.receipt import build_receipt, sign as _sign
+
+    patterns = [p.strip() for p in exclude.split(",") if p.strip()]
+    result = core_analyze(repo_path, llm=_llm_or_none(), exclude=patterns)
+    rec = build_receipt(build_report(result))
+    signature = _sign(rec, secret.encode("utf-8")) if secret else None
+    out = rec.as_dict(signature)
+    if signature is None:
+        out["unsigned"] = (
+            "No secret was supplied, so this receipt is not signed. It is a report, not an "
+            "attestation — do not present it as verified."
+        )
+    return out
+
+
+@server.tool(
+    description=(
+        "Turn a PROVEN finding into a security regression test written in the repository's own "
+        "framework (pytest / vitest / jest), so the repo's own CI catches the hole reopening "
+        "without Tainted installed. Returns the filename and source; it does NOT write the "
+        "file — show the developer the source and let them place it. Only works on a finding "
+        "whose exploit actually fired."
+    )
+)
+def tainted_regression_test(repo_path: str, job_id: str, finding_id: str = "", index: int = 0) -> dict:
+    from tainted.regression_test import emit_regression_test
+    from tainted.repro import NotReproducible
+
+    from tainted.report import Report
+
+    job = _JOBS.get(job_id)
+    if job is None or not job.report:
+        return {"error": f"No completed prove job `{job_id}`. Run tainted_prove_start first."}
+    # The job stores the report serialized; rehydrating it is how `tainted_prove_result` already
+    # rebuilds findings for the reproducers, and the emitter needs the same objects.
+    findings = Report.model_validate(job.report).findings
+    chosen = None
+    if finding_id:
+        chosen = next((f for f in findings if f.candidate.id == finding_id), None)
+    elif 0 <= index < len(findings):
+        chosen = findings[index]
+    if chosen is None:
+        return {"error": "That finding was not found in this job's results."}
+    try:
+        return emit_regression_test(chosen, repo_path).as_dict()
+    except (NotReproducible, ValueError) as exc:
+        return {
+            "error": str(exc),
+            "note": (
+                "Tainted refuses to invent a test here rather than emitting one that asserts "
+                "something nobody observed."
+            ),
+        }
+
+
+@server.tool(
+    description=(
         "How to use Tainted's tools correctly: call order, the index contract, the async "
         "prove job, the ownership boundary, the fix interview, and how to report a result "
         "without overclaiming. Call with no topic to list topics; pass a topic to read it. "

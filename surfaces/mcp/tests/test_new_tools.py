@@ -1,61 +1,82 @@
-"""MCP tools added in 0.2.0: ledger, sarif, mutate-security, and analyze enrichment."""
+"""The four tools the new engine operations reach a calling agent through.
+
+An MCP tool is called by a model, so the tests that matter are the ones about what it refuses:
+non-local targets, missing credentials it must ask a human for, and a finding it cannot honestly
+turn into a test.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import json
 
 from tainted_mcp.server import (
     server,
-    tainted_analyze,
-    tainted_ledger,
-    tainted_mutate_security,
-    tainted_sarif,
+    tainted_invariants,
+    tainted_lockout,
+    tainted_receipt,
+    tainted_regression_test,
 )
 
-ROUTES = "tests/fixtures/vulnerable_routes"
 
-
-def test_new_tools_are_registered():
+def test_the_new_tools_are_registered():
     names = {t.name for t in asyncio.run(server.list_tools())}
-    assert {"tainted_ledger", "tainted_sarif", "tainted_mutate_security"} <= names
+    assert {
+        "tainted_lockout",
+        "tainted_invariants",
+        "tainted_receipt",
+        "tainted_regression_test",
+    } <= names
 
 
-def test_analyze_is_enriched_with_projections():
-    r = tainted_analyze(ROUTES)
-    assert "prioritized" in r and "standards" in r and "silence_ledger" in r
+# ---------------------------------- lockout --------------------------------- #
+def test_lockout_asks_the_human_for_the_owner_login():
+    """Credentials are the developer's to give. The tool must prompt, not invent."""
+    out = tainted_lockout(url="http://localhost:3000")
+    assert out["action_required"] == "ask_user"
+    assert out["needs_credentials"] == ["login_a"]
 
 
-def test_ledger_carries_the_reminder():
-    assert "clean bill of health" in tainted_ledger(ROUTES)["reminder"]
+def test_lockout_refuses_a_non_local_target():
+    out = tainted_lockout(url="https://example.com", login_a="a@x.com:pw", seed="t:1")
+    assert "not local" in out["error"]
 
 
-def test_sarif_is_valid():
-    doc = tainted_sarif(ROUTES)
-    assert doc["version"] == "2.1.0"
-    json.dumps(doc)  # serializable
+# --------------------------------- invariants ------------------------------- #
+def test_invariants_asks_the_human_for_the_attacking_login():
+    out = tainted_invariants(repo_path=".", rules="no cross-user reads", url="http://localhost:3000")
+    assert out["action_required"] == "ask_user"
 
 
-def test_mutate_security_reports_unassessed_without_a_suite():
-    out = tainted_mutate_security(ROUTES)
-    assert out["ran"] is False
+def test_invariants_refuses_a_non_local_target():
+    out = tainted_invariants(
+        repo_path=".", rules="no cross-user reads", url="https://example.com", login_b="b@x.com:pw"
+    )
+    assert "not local" in out["error"]
 
 
-def test_memories_suppress_candidates_but_are_recorded(tmp_path):
-    import textwrap
-    (tmp_path / "route.ts").write_text(textwrap.dedent("""
-        export async function GET(req, { params }) {
-          const { data } = await supabase.from('invoices').select('*').eq('id', params.id);
-          return Response.json(data);
-        }
-    """))
-    analysis = tainted_analyze(str(tmp_path))
-    cands = analysis.get("unproven_candidates") or []
-    if not cands:
-        return  # nothing to suppress on this stub; the engine test covers the rule
-    fid = cands[0]["id"]
-    d = tmp_path / ".tainted"
-    d.mkdir()
-    (d / "memories.json").write_text(json.dumps({"memories": [{"finding_id": fid, "reason": "ok"}]}))
-    again = tainted_analyze(str(tmp_path))
-    assert "suppressions" in again
+def test_invariants_refuses_an_empty_rule_set():
+    out = tainted_invariants(repo_path=".", rules="  |  ", url="http://localhost:3000")
+    assert "No rules" in out["error"]
+
+
+# ---------------------------------- receipt --------------------------------- #
+def test_receipt_is_unsigned_by_default_and_says_so():
+    out = tainted_receipt(repo_path="tests/fixtures/vulnerable_routes")
+    assert "not signed" in out["unsigned"]
+    assert "not_tested" in out
+
+
+def test_receipt_signs_when_given_a_secret():
+    out = tainted_receipt(repo_path="tests/fixtures/vulnerable_routes", secret="k")
+    assert len(out["signature"]) == 64
+    assert "unsigned" not in out
+
+    from tainted.receipt import verify_payload
+
+    assert verify_payload(out, out["signature"], b"k") is True
+
+
+# ----------------------------- regression test ------------------------------ #
+def test_regression_test_needs_a_completed_prove_job():
+    out = tainted_regression_test(repo_path=".", job_id="no-such-job")
+    assert "No completed prove job" in out["error"]

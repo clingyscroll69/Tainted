@@ -146,6 +146,22 @@ class LLMClient(abc.ABC):
             schema=prompts.INJECTION_SCHEMA,
         )
 
+    def compile_invariant(
+        self, rule: str, routes: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Turn a plain-English rule into one concrete request that would violate it.
+
+        Translation only. The model proposes the attack; whether the rule actually holds is
+        decided by firing it, never by asking the model what it thinks.
+        """
+        self._require()
+        return self.complete_json(
+            system=prompts.INVARIANT_SYSTEM,
+            prompt=prompts.invariant_prompt(rule, routes),
+            tier=LLMTier.JUDGE,
+            schema=prompts.INVARIANT_SCHEMA,
+        )
+
     def _require(self) -> None:
         if not self.available:
             raise LLMUnavailable(

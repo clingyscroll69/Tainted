@@ -32,7 +32,13 @@ from tainted.llm.gemini import get_default_client
 from tainted.models import FindingStatus, Severity
 from tainted.report import build_report
 from tainted_ci.oidc import verify_github_ownership
-from tainted_ci.render import render_markdown, render_next_steps, render_tutorial
+from tainted_ci.render import (
+    render_invariants,
+    render_lockout,
+    render_markdown,
+    render_next_steps,
+    render_tutorial,
+)
 
 
 def _llm_or_none():
@@ -151,7 +157,57 @@ def run() -> int:
         except OSError as exc:
             print(f"::warning::could not write SARIF to {sarif_path}: {exc}")
 
+    # A signed receipt for this run, when asked. The untested surface sits inside the signed
+    # payload, so a downstream consumer cannot publish the findings with the admissions removed
+    # and still have it verify.
+    receipt_path = os.environ.get("TAINTED_RECEIPT", "").strip()
+    if receipt_path:
+        import json as _json
+
+        from tainted.receipt import build_receipt, sign as _sign_receipt
+
+        secret = os.environ.get("TAINTED_RECEIPT_SECRET", "")
+        rec = build_receipt(report)
+        signature = _sign_receipt(rec, secret.encode("utf-8")) if secret else None
+        try:
+            with open(receipt_path, "w", encoding="utf-8") as fh:
+                fh.write(_json.dumps(rec.as_dict(signature), indent=2))
+            if signature is None:
+                print(
+                    f"::warning::Tainted wrote an UNSIGNED receipt to {receipt_path} (set "
+                    f"TAINTED_RECEIPT_SECRET to sign it). It is a report, not an attestation."
+                )
+            else:
+                print(f"::notice::Tainted wrote a signed receipt to {receipt_path}")
+        except OSError as exc:
+            print(f"::warning::could not write the receipt to {receipt_path}: {exc}")
+
+    # Rules the repository states about itself, in plain English, fired at the running app. Only
+    # when there is a target to fire at — a rule nobody tested comes back not-tested, never held.
+    invariant_report = None
+    rules_raw = os.environ.get("TAINTED_INVARIANTS", "").strip()
+    if rules_raw and setup is not None:
+        from tainted.invariants import check_invariants
+
+        rules = [r.strip() for r in rules_raw.replace("|", chr(10)).split(chr(10)) if r.strip()]
+        if rules:
+            invariant_report = check_invariants(
+                rules, repo, setup, llm=llm, ownership_verified=True
+            )
+
+    # Did this change lock the owner out of their own data? Asked only when a seed record makes
+    # the answer meaningful.
+    lockout_result = None
+    if os.environ.get("TAINTED_LOCKOUT", "").lower() in ("1", "true", "yes") and setup is not None:
+        from tainted import lockout_check
+
+        lockout_result = lockout_check(setup, ownership_verified=True)
+
     markdown = render_markdown(report, prove_note)
+    if invariant_report is not None:
+        markdown += chr(10) * 2 + render_invariants(invariant_report) + chr(10)
+    if lockout_result is not None:
+        markdown += chr(10) * 2 + render_lockout(lockout_result) + chr(10)
     if fix_note:
         markdown += f"\n\n{fix_note}\n"
     # Say what this run could not reach, and what to set to reach it. A summary with no
@@ -166,6 +222,22 @@ def run() -> int:
     ]
     if blocking:
         print(f"::error::Tainted proved {len(blocking)} finding(s) at/above {fail_on.value}.")
+        return 1
+    # A rule the repository declared about itself, broken by a fired request, is as much a gate as
+    # a proven finding — it IS a proven finding, aimed by a sentence instead of by a scan.
+    if invariant_report is not None and invariant_report.violated:
+        print(
+            f"::error::Tainted broke {len(invariant_report.violated)} stated rule(s) with a real "
+            f"request."
+        )
+        return 1
+    # Locking the owner out fails the build too: a change that secures the data by making it
+    # unreachable has not shipped a working feature.
+    if lockout_result is not None and lockout_result.locked_out:
+        print(
+            f"::error::Tainted found {len(lockout_result.locked_out)} resource(s) the owner can "
+            f"no longer reach. Secure and broken are not the same result."
+        )
         return 1
     # If nothing was proved but static candidates are severe, still gate (analyze-only PRs).
     if not findings:

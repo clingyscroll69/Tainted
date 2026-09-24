@@ -120,6 +120,14 @@ _BASE: dict[Check, dict] = {
         "owasp_asi": ("ASI01", "ASI02"),
         "mitre_atlas": ("AML.T0051.001",),
     },
+    Check.TOOL_TENANCY: {
+        # Object-level authorization, enforced (or not) by a tool backend rather than a route
+        # handler. Same weakness as BOLA, which is why it carries the same CWE and API1 entry;
+        # ASI is added because the caller is an agent and the exposure is the agentic surface.
+        "cwe": ("CWE-639", "CWE-285"),
+        "owasp_api": ("API1:2023",),
+        "owasp_asi": ("ASI02",),
+    },
     Check.TEST_INTEGRITY: {
         # Deliberately empty. A surviving mutant is a measurement of the test suite, not a
         # weakness in the application, and there is no honest catalogue entry for it.
