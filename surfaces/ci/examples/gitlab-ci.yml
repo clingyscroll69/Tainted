@@ -13,8 +13,6 @@ tainted:
     TAINTED_LOGIN_B: "$TAINTED_LOGIN_B"
     TAINTED_SEED: "$TAINTED_SEED"
     TAINTED_FAIL_ON: "high"
-    # The engine reads GITHUB_REPOSITORY; map GitLab's project path onto it.
-    GITHUB_REPOSITORY: "$CI_PROJECT_PATH"
   script:
     - pip install -e . && pip install -e surfaces/ci
     - tainted-ci

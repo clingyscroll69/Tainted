@@ -56,11 +56,11 @@ def test_oidc_rejects_wrong_repo_and_accepts_right_one():
     assert not bad.verified
 
 
-def test_oidc_url_binding_residual_gap():
-    # When a URL is asserted, it must match; this is the stated residual gap.
-    claims = {"repository": "me/myapp", "preview_url": "https://pr-1.vercel.app"}
-    assert verify_oidc(claims, "me/myapp", asserted_url="https://pr-1.vercel.app").verified
-    assert not verify_oidc(claims, "me/myapp", asserted_url="https://evil.app").verified
+def test_oidc_reads_the_repository_from_the_issuers_own_claim():
+    """GitLab names the project in `project_path`; GitHub in `repository`."""
+    claims = {"project_path": "group/app"}
+    assert verify_oidc(claims, "group/app", repo_claim="project_path").verified
+    assert not verify_oidc(claims, "group/app").verified
 
 
 # --------------------------------------------------------------------------- #

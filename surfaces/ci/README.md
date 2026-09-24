@@ -20,9 +20,9 @@ Everything is configured through environment variables (see
 4. exits non-zero when a finding at or above `TAINTED_FAIL_ON` (default `high`) is
    proven.
 
-One gap, stated plainly: to bind the verified workflow to the *specific* preview URL,
-the workflow has to claim that URL itself. Tainted checks that claim but cannot
-independently confirm it.
+One gap, stated plainly: the token binds the run to the repository, not to the preview URL.
+Neither GitHub nor GitLab lets a workflow add a claim of its own, so which host the preview
+runs on is the workflow's word, and every report says so.
 
 ## The checks
 
@@ -56,10 +56,22 @@ bill of health when it may only mean nothing was tried.
 
 ## Ownership verification
 
-Tainted always checks the claims (`repository` must match `$GITHUB_REPOSITORY`). It
-verifies the **signature** against the provider's JWKS when `PyJWT` is installed
-(it is, as one of this surface's dependencies). If it can't verify the
-signature, the report says so instead of pretending it checked.
+The token must come from a trusted issuer, and nothing else is accepted:
+
+| Issuer (`iss`) | Keys | Repository claim | Compared with |
+|---|---|---|---|
+| `https://token.actions.githubusercontent.com` | GitHub's JWKS | `repository` | `$GITHUB_REPOSITORY` |
+| `https://gitlab.com` | `gitlab.com/oauth/discovery/keys` | `project_path` | `$CI_PROJECT_PATH` |
+
+Tainted verifies the signature against that issuer's keys (with `PyJWT`, one of this
+surface's dependencies), and requires audience `tainted` and an unexpired token. A token
+minted for another audience is a credential for something else and is refused. If the
+signature cannot be checked at all, the run is refused and the report says why. Self-managed
+GitLab instances are not on the list.
+
+On GitHub the token is minted in a step with `permissions: id-token: write` (see
+`examples/github-workflow.yml`); `secrets.GITHUB_TOKEN` is an API token, not an OIDC one. On
+GitLab, `id_tokens` with `aud: tainted` mints it.
 
 ## Auto-fix PR
 

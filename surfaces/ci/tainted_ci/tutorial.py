@@ -79,33 +79,41 @@ TAINTED_LOGIN_B: user2@example.com:password456""",
     },
     {
         "topic": "ownership",
-        "title": "Verify the preview claims ownership",
+        "title": "Prove the run is your repository's",
         "summary": "Understand why DNS records cannot guard preview deploys, and how OIDC repo-claims work.",
         "steps": [
             {
                 "heading": "Why not DNS",
-                "body": "A preview deploy lives for one job run, then vanishes. You cannot put a DNS TXT record at a domain that disappears after 10 minutes. So Tainted checks ownership a different way: the GitHub Actions workflow itself claims the URL, and Tainted verifies that claim.",
+                "body": "A preview deploy lives for one job run, then vanishes. You cannot put a DNS TXT record at a domain that disappears after 10 minutes. So Tainted checks ownership a different way: a signed token proves the run belongs to your repository.",
             },
             {
                 "heading": "The OIDC token",
-                "body": "GitHub Actions can mint short-lived signed identity tokens. The token is a JWT whose claims say 'I am github.com/your-org/your-repo run number 123'. Tainted checks this token's signature against GitHub's key server to confirm the claims are genuine.",
-                "command": "TAINTED_OIDC_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+                "body": "GitHub Actions can mint a short-lived signed identity token whose claims say which repository the run belongs to. Tainted accepts it only from GitHub's or gitlab.com's issuer, checks the signature against that issuer's keys, and requires audience tainted. Mint it in a step and pass it in. secrets.GITHUB_TOKEN is an API token, not this one.",
+                "command": """- id: oidc
+  run: |
+    TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \\
+      "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=tainted" | python -c 'import sys,json;print(json.load(sys.stdin)["value"])')
+    echo "::add-mask::$TOKEN"
+    echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+# then, on the Tainted step:
+env:
+  TAINTED_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}""",
             },
             {
                 "heading": "Add the permission block",
-                "body": "GitHub Actions requires you to opt into id-token minting. Add 'permissions: id-token: write' to your job. Without it, Tainted sees no token and refuses to prove against the URL.",
+                "body": "GitHub Actions requires you to opt into id-token minting. Add 'permissions: id-token: write' to your job. Without it, there is no token and Tainted refuses to prove against the URL.",
                 "command": """permissions:
   id-token: write
   contents: read""",
             },
             {
                 "heading": "What Tainted checks",
-                "body": "Tainted decodes the token and verifies its signature. It confirms the repository claim matches GITHUB_REPOSITORY. If verification passes, the report says 'signature verified via JWKS'. If PyJWT is not installed, it says 'claims verified; signature NOT independently checked'.",
-                "expect": "Job summary says 'signature verified via JWKS' or notes that the signature was not independently verified.",
+                "body": "The issuer is GitHub or gitlab.com, the signature is that issuer's, the audience is tainted, the token has not expired, and its repository claim matches GITHUB_REPOSITORY (or CI_PROJECT_PATH on GitLab). Any failure refuses the proof, and the report names which check failed.",
+                "expect": "Job summary says the repository was verified, signed by GitHub Actions, audience tainted.",
             },
             {
                 "heading": "The gap",
-                "body": "This workflow claims it is deploying to the URL you put in TAINTED_TARGET_URL. Tainted checks that claim came from your repo and was signed. But Tainted cannot independently confirm that the preview is actually running at that URL. You claim it; Tainted verifies the claim came from you.",
+                "body": "The token proves the run belongs to your repository. It does not name the preview URL, because neither GitHub nor GitLab lets a workflow add a claim of its own. So which host the preview runs on is your workflow's word, and the report says so every time.",
             },
         ],
         "next": "Move to the-gate to set what severity of proven hole fails the job.",
@@ -202,6 +210,6 @@ TAINTED_LOGIN_B: user2@example.com:password456""",
 NEXT_STEPS: dict[str, str] = {
     "no_target": "Set `TAINTED_TARGET_URL` to your running preview to prove holes by running real exploits. Until then, only static analysis runs — no attacks are fired.",
     "no_accounts": "Set `TAINTED_LOGIN_A` and `TAINTED_LOGIN_B` as `email:password` pairs so Tainted can test ownership boundaries (BOLA: can one account see another's records?).",
-    "ownership_refused": "Add `permissions: {id-token: write}` to your job and pass the token as `TAINTED_OIDC_TOKEN: ${{ secrets.GITHUB_TOKEN }}` so Tainted can verify this workflow owns the preview URL.",
+    "ownership_refused": "Ownership was refused; the line above says which check failed. On GitHub, add `permissions: {id-token: write}`, mint a token for audience `tainted` in a step, and pass it as `TAINTED_OIDC_TOKEN` (see `examples/github-workflow.yml`). `secrets.GITHUB_TOKEN` is not an OIDC token.",
     "all_configured": "All environment variables are set. Proof will run on the next push. Check the job summary for proven findings and re-verification of any fixes.",
 }

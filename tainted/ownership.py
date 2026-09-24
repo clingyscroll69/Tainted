@@ -167,36 +167,29 @@ def _default_dns_resolver() -> Optional[Callable[[str], list[str]]]:
 def verify_oidc(
     claims: dict[str, Any],
     expected_repo: str,
-    asserted_url: Optional[str] = None,
+    repo_claim: str = "repository",
 ) -> OwnershipResult:
-    """Verify OIDC claims name the expected repository (and, if given, the preview URL).
+    """Verify OIDC claims name the expected repository.
 
-    The token's *signature* must already have been checked against the provider's public keys
-    by the caller (GitHub/GitLab JWKS) — this function checks the claims. Ownership is
-    established by who the signed token says is running, bound to the repo, so a copied token
-    naming someone else's repo fails.
+    The token's *signature*, issuer, audience and expiry must already have been checked by the
+    caller against a trusted issuer's public keys — this function checks the claim. Ownership
+    is established by who the signed token says is running, bound to the repo, so a copied
+    token naming someone else's repo fails.
 
-    Stated residual gap: binding the workflow to the *specific* preview URL requires the
-    workflow to assert that URL as a claim, which Tainted checks but cannot independently
-    confirm.
+    Stated residual gap: the token names the repository, not the preview URL. Neither GitHub
+    nor GitLab lets a workflow add a claim of its own, so the host the preview runs on is the
+    workflow's word. A URL check here used to demand a claim no real token carries, which
+    refused every remote CI prove.
     """
-    repo_claim = claims.get("repository") or claims.get("project_path") or ""
-    if repo_claim != expected_repo:
+    repo = claims.get(repo_claim) or ""
+    if repo != expected_repo:
         return OwnershipResult(
             False,
             OwnershipMethod.OIDC,
-            f"repo claim `{repo_claim}` != expected `{expected_repo}`",
+            f"repo claim `{repo}` != expected `{expected_repo}`",
         )
-    if asserted_url is not None:
-        url_claim = claims.get("preview_url") or claims.get("deployment_url")
-        if url_claim != asserted_url:
-            return OwnershipResult(
-                False,
-                OwnershipMethod.OIDC,
-                "workflow did not assert the expected preview URL (residual gap)",
-            )
     return OwnershipResult(
-        True, OwnershipMethod.OIDC, f"repo `{repo_claim}` verified via signed OIDC claims"
+        True, OwnershipMethod.OIDC, f"repo `{repo}` verified via signed OIDC claims"
     )
 
 

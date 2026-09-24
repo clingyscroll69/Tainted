@@ -21,12 +21,42 @@ from __future__ import annotations
 import base64
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Optional
 
-from tainted.dynamic.target import Target
-from tainted.ownership import OwnershipResult, verify_oidc
+from tainted.ownership import OwnershipMethod, OwnershipResult, verify_oidc
 
-_GITHUB_JWKS = "https://token.actions.githubusercontent.com/.well-known/jwks"
+# The audience every Tainted OIDC token is minted for. A token minted for another audience
+# (a cloud provider's, say) is a credential for something else, and accepting it would let a
+# token the pipeline holds for one purpose open this gate too.
+AUDIENCE = "tainted"
+
+
+@dataclass(frozen=True)
+class Issuer:
+    name: str
+    jwks_url: str
+    repo_claim: str
+    repo_env: tuple[str, ...]  # where the pipeline says which repository it is running
+
+
+# The issuers whose signing keys are trusted, by exact `iss`. A token names its own issuer, so
+# without an allowlist a token signed by a key server its minter controls would verify against
+# that key server. GitLab tokens used to be checked against GitHub's keys and could never pass.
+ISSUERS: dict[str, Issuer] = {
+    "https://token.actions.githubusercontent.com": Issuer(
+        name="GitHub Actions",
+        jwks_url="https://token.actions.githubusercontent.com/.well-known/jwks",
+        repo_claim="repository",
+        repo_env=("GITHUB_REPOSITORY",),
+    ),
+    "https://gitlab.com": Issuer(
+        name="GitLab",
+        jwks_url="https://gitlab.com/oauth/discovery/keys",
+        repo_claim="project_path",
+        repo_env=("CI_PROJECT_PATH", "GITHUB_REPOSITORY"),
+    ),
+}
 
 
 def _b64url_json(segment: str) -> dict[str, Any]:
@@ -47,12 +77,13 @@ class SignatureUnavailable(RuntimeError):
     """The signature could not be checked. Distinct from "the signature was wrong"."""
 
 
-def verify_signature(token: str, jwks_url: str = _GITHUB_JWKS) -> bool:
-    """Verify the token against the provider's JWKS.
+def verify_signature(token: str, issuer: Issuer, issuer_url: str) -> bool:
+    """Verify the token's signature, issuer, audience and expiry against the issuer's JWKS.
 
-    Returns True when the signature is good and False when it is bad. Raises
-    :class:`SignatureUnavailable` when it could not be checked at all — a missing library or
-    an unreachable JWKS is not a verdict on the token, and callers must not read it as one.
+    Returns True when all hold and False when any does not. Raises
+    :class:`SignatureUnavailable` when the signature could not be checked at all — a missing
+    library or an unreachable JWKS is not a verdict on the token, and callers must not read it
+    as one.
     """
     try:
         import jwt  # PyJWT
@@ -63,43 +94,65 @@ def verify_signature(token: str, jwks_url: str = _GITHUB_JWKS) -> bool:
             "Install it with `pip install 'tainted-ci'` or `pip install 'pyjwt[crypto]'`."
         ) from exc
     try:
-        signing_key = PyJWKClient(jwks_url).get_signing_key_from_jwt(token)
+        signing_key = PyJWKClient(issuer.jwks_url).get_signing_key_from_jwt(token)
     except Exception as exc:
         raise SignatureUnavailable(
-            f"could not fetch the provider signing key from {jwks_url}: {exc}"
+            f"could not fetch the {issuer.name} signing key from {issuer.jwks_url}: {exc}"
         ) from exc
     try:
         jwt.decode(
-            token, signing_key.key, algorithms=["RS256"], options={"verify_aud": False}
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=AUDIENCE,
+            issuer=issuer_url,
         )
         return True
     except Exception:
         return False
 
 
-def verify_github_ownership(
-    target: Target, token: Optional[str] = None, asserted_url: Optional[str] = None
-) -> OwnershipResult:
-    """Verify a GitHub Actions OIDC token names the repo in $GITHUB_REPOSITORY."""
+def verify_ci_ownership(token: Optional[str] = None) -> OwnershipResult:
+    """Verify a CI OIDC token: a trusted issuer's signature, audience `tainted`, this repository.
+
+    What this establishes is that the run belongs to the repository the pipeline says it is.
+    It does not name the preview URL: neither GitHub nor GitLab lets a workflow put one in its
+    token, so which host the preview runs on stays the workflow's own word, and the detail says
+    so every time rather than leaving it to the docs.
+    """
     token = token or os.environ.get("TAINTED_OIDC_TOKEN", "")
-    expected_repo = os.environ.get("GITHUB_REPOSITORY", "")
-    if not token or not expected_repo:
-        from tainted.ownership import OwnershipMethod
+    if not token:
+        return OwnershipResult(False, OwnershipMethod.OIDC, "no OIDC token (TAINTED_OIDC_TOKEN)")
+    try:
+        claims = decode_claims(token)
+    except ValueError as exc:
+        return OwnershipResult(False, OwnershipMethod.OIDC, f"TAINTED_OIDC_TOKEN is {exc}")
 
+    issuer_url = str(claims.get("iss", ""))
+    issuer = ISSUERS.get(issuer_url)
+    if issuer is None:
         return OwnershipResult(
-            False, OwnershipMethod.OIDC, "missing OIDC token or GITHUB_REPOSITORY"
+            False,
+            OwnershipMethod.OIDC,
+            f"issuer `{issuer_url}` is not trusted; Tainted accepts "
+            + ", ".join(f"{i.name} ({u})" for u, i in ISSUERS.items()),
         )
-    from tainted.ownership import OwnershipMethod
+    expected_repo = next((os.environ[e] for e in issuer.repo_env if os.environ.get(e)), "")
+    if not expected_repo:
+        return OwnershipResult(
+            False,
+            OwnershipMethod.OIDC,
+            f"the pipeline does not say which repository it is ({' or '.join(issuer.repo_env)})",
+        )
 
-    claims = decode_claims(token)
-    result = verify_oidc(claims, expected_repo=expected_repo, asserted_url=asserted_url)
+    result = verify_oidc(claims, expected_repo=expected_repo, repo_claim=issuer.repo_claim)
     if not result.verified:
         return result
 
     # The claims name the right repo. That is only worth anything if the token is genuinely
-    # the provider's, so the signature decides the result rather than annotating it.
+    # the issuer's, minted for Tainted, and still live, so the signature check decides.
     try:
-        signed = verify_signature(token)
+        signed = verify_signature(token, issuer, issuer_url)
     except SignatureUnavailable as exc:
         return OwnershipResult(
             False,
@@ -110,7 +163,12 @@ def verify_github_ownership(
         return OwnershipResult(
             False,
             OwnershipMethod.OIDC,
-            f"{result.detail} — but the token's signature is not the provider's",
+            f"{result.detail} — but the token is not a live {issuer.name} token for audience "
+            f"`{AUDIENCE}`",
         )
-    result.detail += " (signature verified via JWKS)"
+    result.detail += (
+        f" (signed by {issuer.name}, audience `{AUDIENCE}`). The token binds the run to the "
+        f"repository, not to the preview URL: which host the preview runs on is the "
+        f"workflow's own claim."
+    )
     return result

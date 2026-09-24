@@ -34,7 +34,7 @@ from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
 from tainted.llm.gemini import get_default_client
 from tainted.models import Check, FindingStatus, Severity
 from tainted.report import build_report
-from tainted_ci.oidc import verify_github_ownership
+from tainted_ci.oidc import verify_ci_ownership
 from tainted_ci.render import render_markdown, render_next_steps, render_tutorial
 
 
@@ -126,7 +126,7 @@ def run() -> int:
         verified = setup.target.is_local
         detail = "local target"
         if not verified:
-            ownership = verify_github_ownership(setup.target, asserted_url=setup.target.url)
+            ownership = verify_ci_ownership()
             verified = bool(ownership)
             detail = ownership.detail
         if verified:
