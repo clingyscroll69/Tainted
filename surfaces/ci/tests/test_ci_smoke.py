@@ -88,3 +88,59 @@ def test_a_bad_signature_is_refused_distinctly_from_an_uncheckable_one(monkeypat
     result = oidc.verify_github_ownership(Target(url="https://preview.example.com"))
     assert not result.verified
     assert "not the provider" in result.detail
+
+
+# --------------------------------------------------------------------------- #
+# Check selection — `only` / `skip`
+#
+# The action had no way to choose checks, so test_integrity, which runs only when named, could
+# never run in CI at all. A misspelt name must stop the job: silently ignoring it would let the
+# gate pass on a scan narrower or wider than the one asked for.
+# --------------------------------------------------------------------------- #
+def test_a_misspelt_check_fails_the_job_before_anything_runs(monkeypatch, capsys):
+    from tainted_ci import entrypoint
+
+    monkeypatch.setenv("TAINTED_REPO", REPO)
+    monkeypatch.setenv("TAINTED_ONLY", "bola,rsl")
+    monkeypatch.delenv("TAINTED_TARGET_URL", raising=False)
+    monkeypatch.setattr(
+        entrypoint, "core_analyze", lambda *a, **k: (_ for _ in ()).throw(AssertionError("ran"))
+    )
+    assert entrypoint.run() == 2
+    assert "rsl" in capsys.readouterr().out
+
+
+def test_only_and_skip_reach_the_engine(monkeypatch):
+    from tainted.models import Check
+    from tainted_ci import entrypoint
+
+    seen = {}
+
+    def fake_analyze(repo, **kwargs):
+        seen.update(kwargs)
+        return core_analyze(repo, only=kwargs["only"], skip=kwargs["skip"])
+
+    monkeypatch.setenv("TAINTED_REPO", REPO)
+    monkeypatch.setenv("TAINTED_ONLY", " RLS , bola")
+    monkeypatch.setenv("TAINTED_SKIP", "bola")
+    monkeypatch.delenv("TAINTED_TARGET_URL", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    monkeypatch.setattr(entrypoint, "core_analyze", fake_analyze)
+    entrypoint.run()
+    assert seen["only"] == {Check.RLS, Check.BOLA}
+    assert seen["skip"] == {Check.BOLA}
+
+
+def test_an_unmeasured_test_integrity_run_says_so():
+    """Asked for and not measured must not read the same as never asked for."""
+    from tainted.models import Check
+
+    def missing_tool(cmd, cwd):
+        from tainted.checks.test_integrity import CommandResult
+
+        return CommandResult(returncode=127, tool_missing=True)
+
+    result = core_analyze(REPO, only={Check.TEST_INTEGRITY}, mutation_runner=missing_tool)
+    md = render_markdown(build_report(result), "prove skipped: test")
+    assert "### Test integrity" in md
+    assert "Not measured" in md

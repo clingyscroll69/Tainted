@@ -204,11 +204,33 @@ def test_demo_fix_returns_a_real_migration_for_an_rls_finding():
 
 def test_demo_fix_declines_to_write_the_tool_plane_fix():
     """The interview exists because the code cannot answer; the demo must show that, not skip it."""
+    cid = _demo_id(Check.AGENT_INJECTION)
+    with pytest.raises(demo_mode.NeedsAnswers) as asked:
+        demo_mode.demo_fix_result(sleep=_noop, finding_id=cid)
+    assert asked.value.candidate.id == cid
+
+
+def test_demo_fix_writes_the_tool_plane_fix_once_answered():
     result = demo_mode.demo_fix_result(
-        sleep=_noop, finding_id=_demo_id(Check.AGENT_INJECTION)
+        sleep=_noop,
+        finding_id=_demo_id(Check.AGENT_INJECTION),
+        answers={"needs_both": "no", "human_available": "yes", "latency_ok": "yes"},
     )
-    assert result.edits == []
-    assert "underdetermined" in result.notes
+    assert result.edits
+    assert result.metadata["remediation"]
+
+
+def test_demo_fix_endpoint_asks_then_writes():
+    """The page's two requests: the first gets the questions, the second the patch."""
+    body = {"repo_path": "demo/demo", "finding_id": _demo_id(Check.AGENT_INJECTION)}
+    asked = client.post("/api/fix", json=body).json()
+    keys = [q["key"] for q in asked["interview"]]
+    assert keys and all(q["options"] for q in asked["interview"])
+
+    answers = {q["key"]: q["options"][0] for q in asked["interview"]}
+    written = client.post("/api/fix", json={**body, "answers": answers}).json()
+    assert written["edits"]
+    assert written["loop_closed"] is False
 
 
 def test_demo_fix_by_position_follows_the_published_order():
@@ -216,8 +238,11 @@ def test_demo_fix_by_position_follows_the_published_order():
     report = demo_mode.demo_analyze_report(sleep=_noop)
     published = list(report.unproven_candidates)
     for i, cand in enumerate(published):
-        result = demo_mode.demo_fix_result(i, sleep=_noop)
-        assert result.finding.candidate.id == cand.id
+        try:
+            got = demo_mode.demo_fix_result(i, sleep=_noop).finding.candidate
+        except demo_mode.NeedsAnswers as asked:
+            got = asked.candidate
+        assert got.id == cand.id
 
 
 def test_demo_fix_endpoint_says_the_loop_did_not_close():

@@ -753,9 +753,13 @@ def api_fix(req: FixRequest, request: Request):
     """
     if demo_mode.is_demo(req.repo_path, req.repo):
         try:
-            result = demo_mode.demo_fix_result(req.index, finding_id=req.finding_id)
+            result = demo_mode.demo_fix_result(
+                req.index, finding_id=req.finding_id, answers=req.answers
+            )
         except KeyError:
             raise HTTPException(400, f"no finding with id {req.finding_id} in the demo run.")
+        except demo_mode.NeedsAnswers as asked:
+            return _interview_response(asked.candidate)
         payload = result.model_dump(mode="json")
         payload["loop_closed"] = False
         return JSONResponse(payload)
@@ -774,24 +778,29 @@ def api_fix(req: FixRequest, request: Request):
             fix_result = core_fix(Finding(candidate=cand), answers=answers, llm=llm)
         except ValueError:
             # The tool plane refusing to guess. Return the questions, not an error page.
-            return JSONResponse(
-                {
-                    "interview": [
-                        {"key": q.key, "question": q.question, "options": q.options}
-                        for q in tool_plane_interview(cand)
-                    ],
-                    "notes": (
-                        "This fix depends on facts only you hold. Answer these and call /api/fix "
-                        "again with `answers`."
-                    ),
-                }
-            )
+            return _interview_response(cand)
         except NotImplementedError as exc:
             raise HTTPException(400, str(exc))
 
     payload = fix_result.model_dump(mode="json")
     payload["loop_closed"] = False
     return JSONResponse(payload)
+
+
+def _interview_response(cand: Candidate) -> JSONResponse:
+    """The questions a tool-plane fix needs answered before it can be written."""
+    return JSONResponse(
+        {
+            "interview": [
+                {"key": q.key, "question": q.question, "options": q.options}
+                for q in tool_plane_interview(cand)
+            ],
+            "notes": (
+                "This fix depends on facts only you hold. Answer these and call /api/fix "
+                "again with `answers`."
+            ),
+        }
+    )
 
 
 # --------------------------------------------------------------------------- #

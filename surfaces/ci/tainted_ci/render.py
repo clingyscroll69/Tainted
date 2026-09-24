@@ -54,7 +54,17 @@ def render_markdown(report: Report, prove_note: str) -> str:
         lines.append("✅ No candidates found.")
 
     m = report.mutation
-    if m is not None and m.available and m.total:
+    if m is not None and not m.available:
+        # Asked for and not measured is a different thing from never asked for; say which.
+        lines += [
+            "### Test integrity",
+            "",
+            f"Not measured. {m.note} The mutation tool and your test dependencies have to be "
+            "installed where Tainted runs: use `tainted analyze . --only test_integrity` from a "
+            "step that installed them.",
+            "",
+        ]
+    elif m is not None and m.available and m.total:
         pct = f"{m.score:.0%}" if m.score is not None else "n/a"
         lines += [
             "### Test integrity",

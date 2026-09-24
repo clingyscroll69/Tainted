@@ -50,6 +50,24 @@ folder and runs those two installs.
 | `mcp/` | The agent (MCP) | sync `analyze` tools, async `prove` job, interactive `fix` | stdio / SSE MCP server |
 | `website/` | The demonstration (FastAPI) | `analyze` + `prove` + patch download | long-lived container |
 
+## The checks on each surface
+
+Five checks, one engine: `bola`, `rls`, `classic_injection`, `agent_injection`,
+`test_integrity`. Every surface finds, proves and fixes the first four. `test_integrity`
+mutates the code and re-runs the repository's own test suite, so it runs only where running
+that suite is the caller's own choice:
+
+| Surface | `test_integrity` |
+|---|---|
+| CLI | `tainted analyze --only test_integrity`; refused under `watch`, whose writes would retrigger it |
+| CI | named in `only`, and measured only where the tests can run: the action's container says *Not measured*, so use the CLI in a step after your install step |
+| MCP | refused: `tainted_analyze` is advertised to a calling agent as read-only |
+| Website | not offered: it would run a stranger's code on the host; the demo shows the layer |
+
+`agent_injection` is the one fix no surface writes unasked: which remedy fits depends on facts
+only the developer holds, so each surface interviews first (CLI prompt, `tainted_fix_interview`,
+the website's questions). CI never auto-fixes it.
+
 **Publishing any of them: `PUBLISHING.md`** — one section per surface, plus the tag that does all four.
 
 Only **CI** reliably has a running app to attack, so it's the surface where

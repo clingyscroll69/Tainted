@@ -167,6 +167,32 @@ TAINTED_LOGIN_B: user2@example.com:password456""",
                 "body": "You still review the fix before merging. Tainted proposed it, but you approve it. This is not a set-and-forget tool; the fix needs your eyes.",
             },
         ],
+        "next": "Move to choose-checks to see what each check needs before CI can prove it.",
+    },
+    {
+        "topic": "choose-checks",
+        "title": "Choose which checks run",
+        "summary": "Learn what each of the five checks needs to be proved in CI, and narrow the run with only and skip.",
+        "steps": [
+            {
+                "heading": "What each check needs",
+                "body": "bola (one account reading another's record) and rls (a row policy that lets the read through) need the target URL and both logins; a seed record sharpens the probe. classic_injection (a SQL query, shell command or template built from input) needs the target URL, and login B if the route needs a sign-in; only SQL injection is fired, command and template injection are built and deliberately held. agent_injection (one agent holding a tool that reads untrusted content and a tool that acts) needs GEMINI_API_KEY, because a model has to drive the agent in the sandbox; without it the finding is reported, not proved. test_integrity runs only when you name it.",
+            },
+            {
+                "heading": "Narrow the run",
+                "body": "Set only to a comma-separated list to run those checks and nothing else, or skip to leave some out. A misspelt check name fails the job rather than quietly scanning something other than what you asked for.",
+                "command": """with:
+  only: bola,rls
+  skip: agent_injection""",
+            },
+            {
+                "heading": "Measure test integrity where your tests can run",
+                "body": "test_integrity mutates your code and re-runs your own suite, so it needs your test dependencies and mutmut (Python) or Stryker (JS/TS). The action's container has none of them, so naming it there reports Not measured. Run it as an ordinary step after your install step instead, using the CLI.",
+                "command": """- run: pip install -r requirements.txt tainted-cli mutmut
+- run: tainted analyze . --only test_integrity""",
+                "expect": "A Test integrity line with the share of mutants killed, and one low-severity row per line no test caught. None of them fail the job.",
+            },
+        ],
     },
 ]
 

@@ -38,6 +38,18 @@ inputs:
     description: "Seed record as table:id (enables the targeted probe)."
     required: false
     default: ""
+  only:
+    description: >-
+      Comma-separated checks to run, and nothing else: bola, rls, classic_injection,
+      agent_injection, test_integrity. Omit to run every check except test_integrity, which is
+      opt-in because a mutation campaign takes minutes and needs the repository's own test
+      dependencies installed where it runs.
+    required: false
+    default: ""
+  skip:
+    description: "Comma-separated checks to leave out."
+    required: false
+    default: ""
   fail-on:
     description: "Minimum severity that fails the job."
     required: false
@@ -72,6 +84,8 @@ runs:
     TAINTED_LOGIN_B: ${{ inputs.login-b }}
     TAINTED_SEED: ${{ inputs.seed }}
     TAINTED_FAIL_ON: ${{ inputs.fail-on }}
+    TAINTED_ONLY: ${{ inputs.only }}
+    TAINTED_SKIP: ${{ inputs.skip }}
     GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
     GITHUB_REPOSITORY: ${{ github.repository }}
     TAINTED_FIX: ${{ inputs.fix }}

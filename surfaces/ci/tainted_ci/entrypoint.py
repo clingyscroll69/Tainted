@@ -9,6 +9,9 @@ Configuration is by environment (so it works uniformly in GitHub Actions and Git
   TAINTED_SEED           "table:id" seed record (enables the targeted probe)
   TAINTED_OIDC_TOKEN     OIDC identity token (ownership for a non-local target)
   TAINTED_FAIL_ON        minimum severity that fails the job (default: high)
+  TAINTED_ONLY           comma-separated checks to run, and nothing else (test_integrity is
+                         opt-in: it runs only when named here)
+  TAINTED_SKIP           comma-separated checks to leave out
   TAINTED_FIX            "1" to open a PR with the deterministic fixes, re-proved
   TAINTED_TUTORIAL       "1" to print the setup walkthrough and exit without scanning
                          (or a topic slug, to print just that lesson)
@@ -28,7 +31,7 @@ from tainted import analyze as core_analyze
 from tainted import prove as core_prove
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
 from tainted.llm.gemini import get_default_client
-from tainted.models import FindingStatus, Severity
+from tainted.models import Check, FindingStatus, Severity
 from tainted.report import build_report
 from tainted_ci.oidc import verify_github_ownership
 from tainted_ci.render import render_markdown, render_next_steps, render_tutorial
@@ -37,6 +40,23 @@ from tainted_ci.render import render_markdown, render_next_steps, render_tutoria
 def _llm_or_none():
     llm = get_default_client(reload=True)
     return llm if llm.available else None
+
+
+def _checks_from_env(name: str) -> set[Check] | None:
+    """A comma-separated check list, or None when unset. Raises ValueError naming the stray."""
+    tokens = [t.strip().lower() for t in os.environ.get(name, "").split(",") if t.strip()]
+    if not tokens:
+        return None
+    out: set[Check] = set()
+    for token in tokens:
+        try:
+            out.add(Check(token))
+        except ValueError:
+            raise ValueError(
+                f"{name}: unknown check '{token}'. Choose from: "
+                + ", ".join(c.value for c in Check)
+            ) from None
+    return out
 
 
 def _setup_from_env() -> ProveSetup | None:
@@ -74,11 +94,19 @@ def run() -> int:
 
     repo = os.environ.get("TAINTED_REPO", ".")
     fail_on = Severity(os.environ.get("TAINTED_FAIL_ON", "high").lower())
+    try:
+        only = _checks_from_env("TAINTED_ONLY")
+        skip = _checks_from_env("TAINTED_SKIP")
+    except ValueError as exc:
+        # A misspelt check must not quietly widen or narrow the scan; the gate would then pass
+        # on work it never did.
+        print(f"::error::{exc}")
+        return 2
     llm = _llm_or_none()
 
     setup = _setup_from_env()
     result = core_analyze(
-        repo, llm=llm, target=setup.target if setup else None
+        repo, llm=llm, target=setup.target if setup else None, only=only, skip=skip
     )
     findings = []
 

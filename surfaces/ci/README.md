@@ -24,11 +24,30 @@ One gap, stated plainly: to bind the verified workflow to the *specific* preview
 the workflow has to claim that URL itself. Tainted checks that claim but cannot
 independently confirm it.
 
+## The checks
+
+All five run here, from the same engine as every other surface:
+
+| Check | Proved in CI when |
+|---|---|
+| `bola` — one account reads another's record | `target-url`, `login-a`, `login-b` (a `seed` sharpens it) |
+| `rls` — a row policy lets the read through | the same |
+| `classic_injection` — a SQL query, shell command or template built from input | `target-url` (and `login-b` if the route needs a sign-in); only SQL is fired, command and template injection are built and held |
+| `agent_injection` — one agent can both read untrusted content and act | `gemini-api-key`; without it, reported from the code |
+| `test_integrity` — a line no test notices changing | named in `only`, and run where the tests can run (below) |
+
+`only` and `skip` (`TAINTED_ONLY` / `TAINTED_SKIP`) take comma-separated check names; a
+misspelt one fails the job. `test_integrity` mutates the code and re-runs its own suite, so it
+needs the repository's test dependencies and mutmut or Stryker. The action's container has
+none of those, and says *Not measured* if asked; run `tainted analyze . --only test_integrity`
+(from `tainted-cli`) in a step after your install step instead.
+
 ## The walkthrough
 
 `TAINTED_TUTORIAL=1` prints the setup walkthrough and exits without scanning — useful from
 inside the job container while the pipeline is still half-wired. Set it to a topic slug
-(`analyze-only`, `prove-the-preview`, `ownership`, `the-gate`, `auto-fix-pr`) to print just
+(`analyze-only`, `prove-the-preview`, `ownership`, `the-gate`, `auto-fix-pr`,
+`choose-checks`) to print just
 that lesson.
 
 Every report also ends with a **Next steps** block saying how far this particular run

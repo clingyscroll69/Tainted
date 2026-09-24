@@ -40,6 +40,8 @@ jobs:
           login-b: ${{ secrets.TAINTED_LOGIN_B }}
           seed: ${{ vars.TAINTED_SEED }}
           fail-on: high
+          # Every check runs by default except test_integrity. Narrow with `only`/`skip`, e.g.
+          # only: bola,rls
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
           # Opens one PR carrying the fixes this run proved, each re-proved against the same
           # preview. Needs `contents: write` above, and a token that can push.

@@ -60,3 +60,12 @@ def test_the_tour_says_the_demonstration_proves_nothing():
     """The demo's findings are invented. A tour that blurs that oversells the product."""
     js = TOUR.read_text().lower()
     assert "demonstration" in js
+
+
+def test_the_tour_names_every_check():
+    """Each check is a layer of the descent; a reader should meet all five before the dive."""
+    from tainted.models import Check
+
+    js = TOUR.read_text()
+    missing = [c.value for c in Check if c.value not in js]
+    assert not missing, f"the tour never names: {missing}"

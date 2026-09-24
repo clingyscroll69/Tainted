@@ -74,7 +74,10 @@ def test_every_copy_source_exists_in_the_build_context():
 
 @pytest.mark.parametrize(
     "env_var",
-    ["TAINTED_REPO", "TAINTED_TARGET_URL", "TAINTED_FAIL_ON", "TAINTED_FIX", "GH_TOKEN"],
+    [
+        "TAINTED_REPO", "TAINTED_TARGET_URL", "TAINTED_FAIL_ON", "TAINTED_FIX", "GH_TOKEN",
+        "TAINTED_ONLY", "TAINTED_SKIP",
+    ],
 )
 def test_the_action_passes_through_the_environment_the_runner_reads(env_var):
     """An input the entrypoint reads and the manifest never sets is a documented dead feature."""

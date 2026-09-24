@@ -639,14 +639,34 @@ def demo_published_order(analysis: AnalysisResult) -> list[Candidate]:
     return ordered
 
 
+class NeedsAnswers(Exception):
+    """The demo's agent-injection fix, asked for without the interview's answers.
+
+    Raised rather than returned so the endpoint answers the demo exactly as it answers a real
+    run: with the questions, not with a note saying there would have been questions.
+    """
+
+    def __init__(self, candidate: Candidate):
+        super().__init__(candidate.id)
+        self.candidate = candidate
+
+
 def demo_fix_result(
-    index: int = 0, sleep=time.sleep, *, finding_id: Optional[str] = None
+    index: int = 0,
+    sleep=time.sleep,
+    *,
+    finding_id: Optional[str] = None,
+    answers: Optional[dict[str, str]] = None,
 ) -> FixResult:
     """`fix`: the remediation for one demo candidate, patch-only as on any website.
 
     Resolved by id where one is given, exactly as the real path is — the demo used to index
     `ranked()` while its report published a different order, which is the same defect the real
     endpoint had.
+
+    The agent-injection candidate goes through the engine's own interview: no answers raises
+    `NeedsAnswers`, and answers are resolved by the same `fix` a real run uses. Nothing about
+    that path touches a repository, so the demo does not need to imitate it.
     """
     _pause(FIX_SECONDS, sleep)
     analysis = demo_analysis()
@@ -659,6 +679,19 @@ def demo_fix_result(
         if index >= len(candidates):
             index = 0
         candidate = candidates[index]
+    if candidate.check is Check.AGENT_INJECTION:
+        if not answers:
+            raise NeedsAnswers(candidate)
+        from tainted import fix as core_fix
+        from tainted.fix import InterviewAnswer
+
+        result = core_fix(
+            Finding(candidate=candidate),
+            answers=[InterviewAnswer(key=k, choice=v) for k, v in answers.items()],
+        )
+        result.metadata["demo"] = True
+        return result
+
     edits, notes = _demo_edit(candidate)
     return FixResult(
         finding=Finding(candidate=candidate),
@@ -670,7 +703,8 @@ def demo_fix_result(
 
 
 def _demo_edit(candidate: Candidate) -> tuple[list[FileEdit], str]:
-    """The remediation each demo candidate would get, in its own dialect."""
+    """The remediation each demo candidate would get, in its own dialect. (Agent injection is
+    not here: it goes through the engine's interview in `demo_fix_result`.)"""
     meta = candidate.metadata
 
     if candidate.check is Check.RLS:
@@ -742,15 +776,6 @@ def _demo_edit(candidate: Candidate) -> tuple[list[FileEdit], str]:
             ],
             "Dynamic ORDER BY cannot be parameterized — bind the direction and whitelist the "
             "column.",
-        )
-
-    if candidate.check is Check.AGENT_INJECTION:
-        return (
-            [],
-            "This fix is architecturally underdetermined: which of the four remediations is "
-            "right — scope split, mediation, sink confirmation, provenance tracking — depends "
-            "on facts only you hold. Tainted interviews before it writes rather than guessing "
-            "at a decision that isn't the code's to make.",
         )
 
     return (

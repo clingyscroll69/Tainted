@@ -31,7 +31,7 @@ window.TAINTED_TOUR = {
     {
       anchor: 'findings',
       title: 'Each observation shows a path',
-      body: 'One finding lists where a stranger\'s request entered, which check found it, and the depth: how far past the ownership boundary it reached. The depth is a ranking, not a distance. The deeper the mark, the more it had to get through.'
+      body: 'One finding lists where a stranger\'s request entered, which check found it, and the depth: how far past the ownership boundary it reached. The depth is a ranking, not a distance. The deeper the mark, the more it had to get through. Five checks, one layer of the descent each, shallowest first: test_integrity, a line no test notices changing; classic_injection, a query or command built from input; agent_injection, one agent that can both read untrusted content and act on it; bola, another user\'s record reached with your own token; rls, a row policy that lets the read through.'
     },
     {
       anchor: 'hd-str',
@@ -51,11 +51,11 @@ window.TAINTED_TOUR = {
     {
       anchor: 'hd-gates',
       title: 'The website hands you a patch to apply',
-      body: 'Fix generates a patch you download and apply yourself. The website has no working tree, so it cannot write to your repo or re-run the check. Take the patch to your terminal, apply it, run the attack again on your own. That is where this surface stops.'
+      body: 'Fix generates a patch you download and apply yourself. The website has no working tree, so it cannot write to your repo or re-run the check. Take the patch to your terminal, apply it, run the attack again on your own. That is where this surface stops. An agent_injection fix asks a few questions first, because which remedy fits depends on facts only you hold. Your answers pick it.'
     }
   ],
   outro: {
     title: 'One surface of four',
-    body: 'This is the browser version. The CLI surface runs in your terminal. The CI surface gates your build. The MCP surface hands findings to your coding agent. They all run the same engine and report the same checks. Come back here to see the whole descent at once.'
+    body: 'This is the browser version. The CLI surface runs in your terminal. The CI surface gates your build. The MCP surface hands findings to your coding agent. They all run the same engine and report the same checks, with one exception: test_integrity re-runs your own test suite, so only the CLI measures it, where your tests already run. Come back here to see the whole descent at once.'
   }
 };

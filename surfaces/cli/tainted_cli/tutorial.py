@@ -27,6 +27,12 @@ LESSONS: list[dict] = [
                 "body": "Set your GEMINI_API_KEY environment variable. Run analyze again. Tainted will rank the same holes differently because it now asks the model questions the code alone cannot answer, like whether an id belongs to someone and if anyone checked ownership.",
                 "command": "export GEMINI_API_KEY=your-key && tainted analyze ./my-app",
             },
+            {
+                "heading": "Measure the tests that should catch it",
+                "body": "test_integrity is the one check analyze leaves out unless you name it. It mutates your code and re-runs your own suite (mutmut for Python, Stryker for JS/TS), which takes minutes and needs that tool and your test dependencies installed. Every change no test catches is listed as a low-severity line to look at, never a vulnerability.",
+                "command": "tainted analyze ./my-app --only test_integrity",
+                "expect": "A Test integrity line with the share of mutants killed, and one row per surviving mutant. If the tool is missing, the line says it was not measured and why.",
+            },
         ],
         "next": "Next, read the proof-strength labels in a report to understand which holes are proven and which are still hunches.",
     },
@@ -41,7 +47,7 @@ LESSONS: list[dict] = [
             },
             {
                 "heading": "Check names the rule that found it",
-                "body": "bola is Broken Object Level Access, where one user reaches another user's data through an API route. rls is Row Level Security, a database policy that should but does not block the read. agent_injection is when an LLM agent's tools could be misused. Each one has its own proof strategy.",
+                "body": "bola is Broken Object Level Authorization: one user reaches another user's record with their own token. rls is Row Level Security: the database's own row policy is missing or lets the read through. classic_injection is a SQL query, shell command or template built from input. agent_injection is one agent holding both a tool that reads untrusted content and a tool that acts, so the content can steer the action. test_integrity is a line your tests would not notice changing. Each one has its own proof strategy.",
             },
             {
                 "heading": "Title and Location pinpoint the hole",

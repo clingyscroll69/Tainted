@@ -908,6 +908,17 @@ h1,h2,h3,p{margin:0}
 .patch pre .add{color:var(--add)}
 .patch pre .del{color:var(--del)}
 .patch pre .file{color:var(--wash-dim)}
+/* The interview: the questions an agent-injection fix needs answered before it can be written.
+   Same sentence-case radio treatment as the GitHub scope chooser, one fieldset per question. */
+.ask-form{padding:13px 15px;display:flex;flex-direction:column;gap:12px}
+.ask-form fieldset{border:1px solid var(--rule-soft);border-radius:3px;margin:0;
+  padding:9px 12px 11px;display:flex;flex-wrap:wrap;gap:6px 18px}
+.ask-form legend{padding:0 5px;margin-left:-5px;font-size:0.8125rem;line-height:1.5;
+  color:var(--snow)}
+.ask-form label{display:flex;align-items:center;gap:7px;cursor:pointer;font-size:0.8125rem;
+  color:var(--wash)}
+.ask-form input[type=radio]{margin:0;accent-color:var(--thermo);width:15px;height:15px}
+.ask-form .mini{align-self:flex-start}
 /* The patch enters with a small slide rather than just appearing, since it inserts into a
    finding the reader is already looking at. Only 6px: it settles, it does not travel. */
 .patch{
@@ -7619,37 +7630,13 @@ html.is-diving,html.is-diving body{overflow:hidden}
     btn.setAttribute('aria-busy', 'true');
     try {
       const fix = await call('/api/fix', body);
-      const box = document.createElement('div');
-      /* A patch is a recommendation, not evidence, so it gets the dashed frame instead of
-         the proof block's solid one. Added and removed lines are colored, since a diff read
-         as flat text makes the reader work out the changes by eye. */
-      box.className = 'proof patch';
-      const hasEdits = (fix.edits || []).length > 0;
-      const diff = (fix.edits || []).map(e =>
-        '<span class="file">' + ESC(e.file) + '</span>\n' +
-        ESC(e.replacement).split('\n').map(l =>
-          l.startsWith('+') ? '<span class="add">' + l + '</span>'
-          : l.startsWith('-') ? '<span class="del">' + l + '</span>' : l).join('\n')
-      ).join('\n\n');
-      box.innerHTML = '<div class="ph"><span class="lbl">' +
-        (hasEdits ? 'Suggested patch' : 'Not written &mdash; this fix needs your answer') +
-        '</span><span class="step">' +
-        (hasEdits ? 'apply it yourself; no working tree here' : 'underdetermined by the code') +
-        '</span></div><pre>' + diff +
-        (fix.notes ? (diff ? '\n\n' : '') + '<span class="dim">' + ESC(fix.notes) + '</span>' : '') +
-        '</pre>';
+      const box = fix.interview && fix.interview.length
+        ? interviewBox(fix, body, btn) : patchBox(fix);
       const acts = article.querySelector('.acts');
       acts.parentNode.insertBefore(box, acts);
       btn.classList.remove('running');
       btn.removeAttribute('aria-busy');
-      /* Only the label is rewritten. `textContent` would take the icon with it, and the acts
-         row would then relayout wide enough to wrap onto a second line, in the same instant
-         the patch above it was fading up. */
-      const glyph = btn.querySelector('use');
-      if(glyph) glyph.setAttribute('href', hasEdits ? '#i-proof' : '#i-wrench');
-      const label = [...btn.childNodes].find(n => n.nodeType === 3);
-      const text = hasEdits ? 'Patch written below' : 'Needs your answer';
-      if(label) label.nodeValue = text; else btn.append(text);
+      markFixButton(btn, (fix.edits || []).length > 0);
       box.setAttribute('tabindex', '-1');
       box.focus({preventScroll: true});
       /* Focus has already moved to the patch, so disabling the button now takes nothing
@@ -7663,6 +7650,89 @@ html.is-diving,html.is-diving body{overflow:hidden}
       showError('Could not write that fix.', ' ' + e.message + ' Try again.');
     }
   });
+
+  /* Only the label is rewritten. `textContent` would take the icon with it, and the acts
+     row would then relayout wide enough to wrap onto a second line, in the same instant
+     the patch above it was fading up. */
+  function markFixButton(btn, hasEdits){
+    const glyph = btn.querySelector('use');
+    if(glyph) glyph.setAttribute('href', hasEdits ? '#i-proof' : '#i-wrench');
+    const label = [...btn.childNodes].find(n => n.nodeType === 3);
+    const text = hasEdits ? 'Patch written below' : 'Needs your answer';
+    if(label) label.nodeValue = text; else btn.append(text);
+  }
+
+  /* A patch is a recommendation, not evidence, so it gets the dashed frame instead of
+     the proof block's solid one. Added and removed lines are colored, since a diff read
+     as flat text makes the reader work out the changes by eye. */
+  function patchBox(fix){
+    const box = document.createElement('div');
+    box.className = 'proof patch';
+    const hasEdits = (fix.edits || []).length > 0;
+    const diff = (fix.edits || []).map(e =>
+      '<span class="file">' + ESC(e.file) + '</span>\n' +
+      ESC(e.replacement).split('\n').map(l =>
+        l.startsWith('+') ? '<span class="add">' + l + '</span>'
+        : l.startsWith('-') ? '<span class="del">' + l + '</span>' : l).join('\n')
+    ).join('\n\n');
+    box.innerHTML = '<div class="ph"><span class="lbl">' +
+      (hasEdits ? 'Suggested patch' : 'Not written &mdash; this fix needs your answer') +
+      '</span><span class="step">' +
+      (hasEdits ? 'apply it yourself; no working tree here' : 'underdetermined by the code') +
+      '</span></div><pre>' + diff +
+      (fix.notes ? (diff ? '\n\n' : '') + '<span class="dim">' + ESC(fix.notes) + '</span>' : '') +
+      '</pre>';
+    return box;
+  }
+
+  /* An agent-injection fix is underdetermined by the code: which of the four remedies fits
+     depends on facts only the developer holds. The engine answers with questions instead of
+     a guess, and this is where they are asked. Answering sends the same request again with
+     `answers`, and the patch that comes back takes the questions' place. */
+  let askSeq = 0;
+  function interviewBox(fix, body, fixBtn){
+    const box = document.createElement('div');
+    box.className = 'proof patch ask';
+    const seq = ++askSeq;
+    box.innerHTML = '<div class="ph"><span class="lbl">This fix needs your answer</span>' +
+      '<span class="step">the code cannot decide it</span></div>' +
+      '<form class="ask-form">' +
+      fix.interview.map((q, qi) =>
+        '<fieldset><legend>' + ESC(q.question) + '</legend>' +
+        (q.options || []).map(o =>
+          '<label><input type="radio" required name="ask-' + seq + '-' + qi + '" ' +
+          'data-key="' + ESC(q.key) + '" value="' + ESC(o) + '"><span>' + ESC(o) +
+          '</span></label>').join('') +
+        '</fieldset>').join('') +
+      '<button class="mini" type="submit">' +
+      '<svg class="icon" viewBox="0 0 16 16" aria-hidden="true"><use href="#i-wrench"/></svg>' +
+      'Write the fix</button></form>';
+    const form = box.querySelector('form');
+    form.addEventListener('submit', async ev => {
+      ev.preventDefault();
+      const submit = form.querySelector('button');
+      if(submit.dataset.busy === '1') return;
+      const answers = {};
+      form.querySelectorAll('input:checked').forEach(i => { answers[i.dataset.key] = i.value; });
+      submit.dataset.busy = '1';
+      submit.classList.add('running');
+      submit.setAttribute('aria-busy', 'true');
+      try {
+        const answered = await call('/api/fix', Object.assign({}, body, {answers}));
+        const patch = patchBox(answered);
+        box.replaceWith(patch);
+        markFixButton(fixBtn, (answered.edits || []).length > 0);
+        patch.setAttribute('tabindex', '-1');
+        patch.focus({preventScroll: true});
+      } catch(e){
+        submit.dataset.busy = '';
+        submit.classList.remove('running');
+        submit.removeAttribute('aria-busy');
+        showError('Could not write that fix.', ' ' + e.message + ' Try again.');
+      }
+    });
+    return box;
+  }
 })();
 </script>
 <script src="/static/tutorial.js"></script>
