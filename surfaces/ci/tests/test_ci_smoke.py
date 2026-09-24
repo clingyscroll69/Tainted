@@ -51,8 +51,6 @@ def keys(monkeypatch):
     """A local RSA key standing in for the issuer's JWKS, and the URL each lookup asked for."""
     from cryptography.hazmat.primitives.asymmetric import rsa
 
-    import tainted_ci.oidc as oidc
-
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     asked: list[str] = []
 

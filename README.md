@@ -45,7 +45,7 @@ Tainted states plainly how far it reached rather than assuming it reached everyt
 | **BOLA** | Finds routes (Flask, FastAPI, Express, Next App/Pages) + Semgrep taint | Account B requests account A's record through the route that leaks it, and A requests it as a control. Only reads are sent: a write route's request is built and held |
 | **RLS** | Checks migrations and client reads against `auth.uid()` policies | Reads a capped number of rows over PostgREST; only counts as proven when a returned row is clearly not the caller's |
 | **Classic injection** | Regex pass, confirmed by Semgrep taint | SQL injection is proven live on read routes; on a write route the payload is built and held. Command and template injection are demonstrated with a real payload but never executed |
-| **Agent injection** | Reads the tool graph across MCP, n8n, Flowise, LangChain (Python/JS), CrewAI | A configured agent is proven in a sandbox with logging-stub tools. A coded agent is reported from the code only, never run |
+| **Agent injection** | Reads the tool graph across MCP, n8n, Flowise, LangChain (Python/JS), CrewAI | A configured agent is proven in a sandbox with logging-stub tools, and only when the sink call carries a string the attack's payload chose; a payload that names none is reported, not run. A coded agent is reported from the code only, never run |
 | **Test integrity** | — | The mutant that survives (via Stryker / mutmut) is itself the proof |
 
 Every report says which checks were proven and which were only analyzed. Without that,

@@ -14,7 +14,7 @@ runnable entrypoint. `run_sandbox` refuses a coded scope by design.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 from tainted.models import (
     Candidate,
@@ -111,6 +111,27 @@ def run_sandbox(
     target_sink = injection.get("target_sink") or scope.sinks[0].name
     sink_names = [t.name for t in scope.sinks]
 
+    # Proof is the sink carrying something only the attacker could have put there. A payload
+    # that names no such content leaves nothing to recognise, and an agent calling its own sink
+    # in the ordinary way would read as turned; so without a marker the sandbox is not run.
+    markers = _attacker_markers(injection)
+    if not markers:
+        finding.status = FindingStatus.REPORTED
+        finding.proof = ProbeResult(
+            succeeded=False,
+            kind="agent_injection",
+            exploit=Exploit(payload=payload, executed=False, description="Generated, not run."),
+            notes=(
+                "The generated payload named no attacker-chosen content that also appears in "
+                "it (`expected_sink_args`), so a sink call could not be told apart from the "
+                "agent's ordinary work. Not run; reported from the graph."
+            ),
+        )
+        finding.provenance.append(
+            Provenance(origin=Register.STRUCTURE, detail="no attacker marker: not attempted")
+        )
+        return finding
+
     # Stand up logging stubs for every sink; the source returns the poisoned content.
     stubs = {name: SinkStub(name=name) for name in sink_names}
     system = (
@@ -126,9 +147,8 @@ def run_sandbox(
 
     # Confirmed only when the targeted sink fired carrying attacker-chosen content.
     fired = stubs.get(target_sink)
-    attacker_marker = _attacker_marker(injection)
     turned = bool(fired and fired.calls) and _args_carry_marker(
-        fired.calls if fired else [], attacker_marker
+        fired.calls if fired else [], markers
     )
 
     exploit = Exploit(
@@ -158,21 +178,35 @@ def run_sandbox(
     return finding
 
 
-def _attacker_marker(injection: dict[str, Any]) -> Optional[str]:
-    expected = injection.get("expected_sink_args")
-    if isinstance(expected, dict) and expected:
-        # Use the first string value as a marker to look for in the actual call.
-        for v in expected.values():
-            if isinstance(v, str) and v:
-                return v
-    return None
+# Shorter strings turn up in ordinary arguments by chance ("to", "hi", an id).
+_MIN_MARKER = 4
 
 
-def _args_carry_marker(calls: list[ToolCall], marker: Optional[str]) -> bool:
-    if marker is None:
-        return True  # no specific marker required; any fire of the sink counts
-    for call in calls:
-        for v in call.args.values():
-            if isinstance(v, str) and marker in v:
-                return True
-    return False
+def _strings(value: Any) -> list[str]:
+    """Every string leaf of a value, however deeply its dicts and lists nest."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for v in value.values() for s in _strings(v)]
+    if isinstance(value, (list, tuple)):
+        return [s for v in value for s in _strings(v)]
+    return []
+
+
+def _attacker_markers(injection: dict[str, Any]) -> list[str]:
+    """The attacker-chosen strings a turned sink call would carry.
+
+    Only those the payload itself contains count: a value the payload never mentions is not
+    something the attacker handed the agent, and finding it in a call would prove nothing.
+    """
+    payload = str(injection.get("payload") or "")
+    return [
+        s
+        for s in _strings(injection.get("expected_sink_args"))
+        if len(s.strip()) >= _MIN_MARKER and s in payload
+    ]
+
+
+def _args_carry_marker(calls: list[ToolCall], markers: list[str]) -> bool:
+    """Whether any call's arguments, at any depth, carry one of the attacker's markers."""
+    return any(m in s for call in calls for s in _strings(call.args) for m in markers)
