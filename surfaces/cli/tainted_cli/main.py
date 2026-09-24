@@ -9,7 +9,6 @@ import typer
 
 from tainted import analyze as core_analyze
 from tainted import fix as core_fix
-from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target  # noqa: F401
 from tainted.fix.paths import edit_target
 from tainted.llm.gemini import get_default_client
@@ -145,22 +144,11 @@ def fix(
         0, help="The # column from `analyze`. Only meaningful for that exact run."
     ),
     apply: bool = typer.Option(False, help="Write the fix to disk instead of just printing the diff"),
-    url: Optional[str] = typer.Option(
-        None,
-        help=(
-            "Base URL of the running app. If you give this, Tainted re-runs the attack after "
-            "the fix to check it now fails, and checks real users still have access."
-        ),
-    ),
-    login_a: Optional[str] = typer.Option(None, "--login-a", help="Account A, as email:password"),
-    login_b: Optional[str] = typer.Option(None, "--login-b", help="Account B, as email:password"),
-    seed: Optional[str] = typer.Option(None, help="Seed record, as table:id"),
-    anon_key: Optional[str] = typer.Option(None, help="Supabase anon key"),
     yes: bool = typer.Option(
         False, "--yes", help="Skip the questions and accept the defaults"
     ),
 ):
-    """Write the fix for a finding. If you give a target, re-check that the hole is closed."""
+    """Write the fix for a finding. Verify it by applying it and running `prove` again."""
     from tainted.models import Finding
 
     llm = _llm_or_none()
@@ -181,15 +169,9 @@ def fix(
     if candidate.check is Check.AGENT_INJECTION:
         answers = _run_interview(candidate, accept_defaults=yes)
 
-    setup = None
-    if url and login_a and login_b:
-        setup = _build_setup(url, login_a, login_b, seed, anon_key)
-
     try:
         result_fix = core_fix(
             finding,
-            setup=setup,
-            replay_after=SupabaseReplay(setup.target) if setup else None,
             answers=answers,
             repo_path=str(repo) if candidate.check is Check.AGENT_INJECTION else None,
         )

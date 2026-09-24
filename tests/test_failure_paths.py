@@ -2,7 +2,7 @@
 
 Each test here pins a path that used to go wrong: a model call that failed, an agent driver that
 could not finish a turn, a repository living under a directory called `build`, a Semgrep path
-spelled differently from every other one, and a re-prove that never reached the target.
+spelled differently from every other one.
 """
 
 from __future__ import annotations
@@ -10,19 +10,16 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-import httpx
 import pytest
 
-from tainted import analyze, fix, prove
+from tainted import analyze, prove
 from tainted.dynamic.agent_driver import AgentDriverError
-from tainted.dynamic.replay import SupabaseReplay
 from tainted.dynamic.target import Account, ProveSetup, SeedRecord, Target
 from tainted.llm.client import LLMCallFailed, LLMUnavailable
 from tainted.models import (
     AnalysisResult,
     Candidate,
     Check,
-    Finding,
     FindingStatus,
     Plane,
     SourceLocation,
@@ -127,29 +124,6 @@ def test_semgrep_paths_become_repo_relative(tmp_path):
 # --------------------------------------------------------------------------- #
 # The fix loop
 # --------------------------------------------------------------------------- #
-def test_a_re_prove_that_never_reaches_the_target_is_not_fixed():
-    def unreachable(request):
-        raise httpx.ConnectError("connection refused", request=request)
-
-    finding = Finding(
-        candidate=Candidate(
-            check=Check.RLS,
-            plane=Plane.REQUEST,
-            title="Permissive true policy on invoices",
-            location=SourceLocation(file="m.sql", line=1),
-            metadata={"table": "invoices", "owner_column": "owner"},
-        ),
-        status=FindingStatus.PROVEN,
-    )
-    replay = SupabaseReplay(
-        _setup().target, httpx.Client(transport=httpx.MockTransport(unreachable))
-    )
-    result = fix(finding, setup=_setup(), replay_after=replay)
-    assert result.resulting_status is FindingStatus.PROVEN
-    attack = next(a for a in result.assertions if a.name == "attack_now_fails")
-    assert not attack.passed and "could not be re-run" in attack.detail
-
-
 @pytest.mark.parametrize("name", ["self", "name"])
 def test_a_sink_argument_may_carry_any_name(name):
     from tainted.dynamic.sandbox import SinkStub

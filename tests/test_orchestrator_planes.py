@@ -52,7 +52,7 @@ def setup(**overrides) -> ProveSetup:
         target=Target(url="http://localhost:3000"),
         account_a=Account(label="A", email="a@x", password="p", access_token="tok-A"),
         account_b=Account(label="B", email="b@x", password="p", access_token="tok-B"),
-        seed=SeedRecord(table="invoices", id=SEED_ID, route_path="/api/invoices/[id]"),
+        seed=SeedRecord(table="invoices", id=SEED_ID),
     )
     base.update(overrides)
     return ProveSetup(**base)

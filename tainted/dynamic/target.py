@@ -133,10 +133,6 @@ class SeedRecord(BaseModel):
     id: str
     id_column: str = "id"
     owner_column: Optional[str] = None  # e.g. "owner" / "user_id", when known
-    # The app route this record is reachable through, when known (e.g. "/api/invoices/[id]").
-    # Lets the re-prove confirm A still reads its own record through the same door B was
-    # blocked at, rather than through a different one that proves less.
-    route_path: Optional[str] = None
 
 
 class Target(BaseModel):

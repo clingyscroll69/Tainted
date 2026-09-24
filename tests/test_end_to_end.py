@@ -65,7 +65,10 @@ def test_full_loop_analyze_prove_fix(vuln_repo):
     assert invoices.status == FindingStatus.PROVEN
     assert INVOICE_ID in invoices.proof.response_body
 
-    # fix — apply and re-prove against a now-enforcing target.
+    # fix — the patch; then prove again against the target with it applied.
+    patch = fix(invoices)
+    assert patch.edits and "run `prove`" in patch.notes
+
     def _fixed(request):
         if request.url.path == "/rest/v1/invoices":
             auth = request.headers.get("authorization", "")
@@ -74,9 +77,9 @@ def test_full_loop_analyze_prove_fix(vuln_repo):
             return httpx.Response(200, json=[])
         return httpx.Response(404, json=[])
 
-    fixed = fix(invoices, setup=_setup(), replay_after=_replay(_fixed))
-    assert fixed.resulting_status == FindingStatus.FIXED
-    assert fixed.all_assertions_passed
+    after = prove(result, _setup(), replay=_replay(_fixed))
+    invoices_after = next(f for f in after if f.candidate.metadata.get("table") == "invoices")
+    assert invoices_after.status is not FindingStatus.PROVEN
 
 
 def test_prove_refuses_unverified_remote_target(vuln_repo):

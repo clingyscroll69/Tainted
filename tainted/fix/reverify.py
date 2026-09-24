@@ -1,8 +1,9 @@
-"""Checking that the fix actually worked, by running the attack again.
+"""Checking a fix before it is applied, where that means anything.
 
-Request-plane fixes don't reshape anything, so Tainted just runs the same attack again and
-checks two things: it fails, and the real owner can still read their own record. A policy
-that locks out the real owner is broken even though it's secure.
+A request-plane fix is checked the only way that means anything: apply it, deploy it, and run
+`prove` against the same target. Re-running the attack beside a patch nobody has applied yet
+only re-finds the hole, so `fix` does not pretend to; `prove` also asks as the owner, so a
+fix that locks everyone out reads as unproven rather than as held.
 
 Tool-plane fixes reshape the graph itself, so Tainted rebuilds the graph as the fix leaves it
 and looks for the pairing again, wherever it now sits. That also catches a fix that moves the
@@ -13,108 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-import httpx
-
-from tainted.dynamic.probes import prove_candidate
-from tainted.dynamic.replay import SupabaseReplay
-from tainted.dynamic.route_probes import RouteProber
-from tainted.dynamic.target import ProveSetup
-from tainted.models import (
-    Check,
-    FindingStatus,
-    FixResult,
-    ReverifyAssertion,
-)
-
-
-# --------------------------------------------------------------------------- #
-# Request plane: run the attack again, check both things
-# --------------------------------------------------------------------------- #
-def reverify_request_plane(
-    fix: FixResult,
-    setup: ProveSetup,
-    replay: SupabaseReplay,
-    prober: Optional[RouteProber] = None,
-) -> FixResult:
-    """Run the attack again against the fixed target and record both checks on the FixResult."""
-    finding = fix.finding
-    is_route = finding.check is Check.BOLA and finding.candidate.metadata.get("route_path")
-
-    # Check 1: the attack now fails. Run it again through the same door it got through before.
-    if is_route:
-        prober = prober or RouteProber(setup)
-        reproved = prober.prove_route_bola(finding.candidate)
-    else:
-        reproved = prove_candidate(finding.candidate, setup, replay)
-    # Only an attack that ran and was refused counts as blocked. A re-prove that never reached
-    # the target (REPORTED) blocked nothing, and reading "not PROVEN" as success turned a dead
-    # preview deploy into a FIXED verdict.
-    attack_blocked = reproved.status is FindingStatus.NOT_REPRODUCED
-    attack_rerun = reproved.status in (FindingStatus.PROVEN, FindingStatus.NOT_REPRODUCED)
-    fix.assertions.append(
-        ReverifyAssertion(
-            name="attack_now_fails",
-            passed=attack_blocked,
-            detail=(
-                (reproved.proof.notes if reproved.proof else "the probe returned no result")
-                if attack_rerun
-                else "The attack could not be re-run, so the fix is unverified: "
-                + (reproved.proof.notes if reproved.proof else "the probe returned no result")
-            ),
-        )
-    )
-
-    # Check 2: the real owner can still read their own row.
-    if is_route and prober is not None:
-        legit_ok, legit_detail = prober.legitimate_access_survives()
-    else:
-        legit_ok, legit_detail = _legitimate_access_survives(setup, replay)
-    fix.assertions.append(
-        ReverifyAssertion(
-            name="legitimate_access_survives", passed=legit_ok, detail=legit_detail
-        )
-    )
-
-    if attack_rerun:
-        fix.resulting_status = _classify(attack_blocked, legit_ok)
-    else:
-        # Unverified: the finding stands exactly as it did before the fix was written.
-        fix.resulting_status = fix.finding.status
-    fix.finding.status = fix.resulting_status
-    return fix
-
-
-def _legitimate_access_survives(
-    setup: ProveSetup, replay: SupabaseReplay
-) -> tuple[bool, str]:
-    """As account A, read A's own seed row. It must still come back."""
-    if setup.seed is None:
-        return True, "No seed record supplied — legitimacy check skipped."
-    try:
-        replay.authenticate(setup.account_a)
-        resp = replay.select_by_id(
-            setup.account_a, setup.seed.table, setup.seed.id, id_column=setup.seed.id_column
-        )
-    except httpx.HTTPError as exc:
-        return False, f"Account {setup.account_a.label}'s own read failed after the fix: {exc}"
-    rows = replay.rows(resp)
-    got_own = resp.status_code == 200 and any(
-        str(r.get(setup.seed.id_column)) == str(setup.seed.id) for r in rows
-    )
-    if got_own:
-        return True, f"Account {setup.account_a.label} still reads its own row."
-    return False, (
-        f"Account {setup.account_a.label} can no longer read its own row "
-        f"(status {resp.status_code}). The fix broke access for the real owner."
-    )
-
-
-def _classify(attack_blocked: bool, legit_ok: bool) -> FindingStatus:
-    if attack_blocked and legit_ok:
-        return FindingStatus.FIXED
-    if attack_blocked and not legit_ok:
-        return FindingStatus.BROKE_IT_SAFELY  # secure, but it also locked out the real owner
-    return FindingStatus.PROVEN  # the attack still works, so this is not fixed
+from tainted.models import FindingStatus, FixResult, ReverifyAssertion
 
 
 # --------------------------------------------------------------------------- #

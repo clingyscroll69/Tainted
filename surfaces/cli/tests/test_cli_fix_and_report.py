@@ -52,13 +52,19 @@ def test_bola_candidates_appear_in_the_default_run():
 # --------------------------------------------------------------------------- #
 # Fix
 # --------------------------------------------------------------------------- #
-def test_request_plane_fix_prints_a_migration_and_says_the_loop_is_open():
+def test_request_plane_fix_prints_a_migration_and_says_prove_verifies_it():
     result = runner.invoke(app, ["fix", SUPABASE, "--index", "0"])
     assert result.exit_code == 0
     assert "enable row level security" in result.stdout
-    # Without a target the loop cannot close, and the output must not imply it did.
-    assert "patch-only" in result.stdout
-    assert "Re-verification" not in result.stdout
+    # fix checks nothing it has not applied; the output must say where verification comes from.
+    assert "run `prove`" in " ".join(result.stdout.split())
+    assert "Re-check" not in result.stdout
+
+
+def test_fix_no_longer_takes_a_target():
+    """`--url` promised a re-proof that ran against the unfixed app and always failed."""
+    result = runner.invoke(app, ["fix", SUPABASE, "--url", "http://localhost:3000"])
+    assert result.exit_code != 0
 
 
 def test_bola_fix_emits_the_missing_predicate_in_the_right_dialect():

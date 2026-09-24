@@ -61,8 +61,8 @@ inputs:
   fix:
     description: >-
       "true" to open a pull request carrying the deterministic fixes for every finding this run
-      proved, each re-proved against the same preview. Needs `github-token` with
-      `contents: write` and `pull-requests: write`.
+      proved. The PR's own preview deploy re-proves them when its CI runs. Needs
+      `github-token` with `contents: write` and `pull-requests: write`.
     required: false
     default: ""
   github-token:

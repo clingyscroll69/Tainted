@@ -167,12 +167,12 @@ LESSONS: list[dict] = [
                 "body": "If prove finds any high-severity proven findings, it exits with code 1. Exit code 0 means no proven findings at that level or higher. Exit code 2 means the target was not localhost and prove was refused. Use these exit codes in scripts to decide what to do next.",
             },
         ],
-        "next": "Next, use tainted fix to write a fix and prove the hole closes.",
+        "next": "Next, use tainted fix to write a fix, then prove it again to see the hole close.",
     },
     {
         "topic": "fixing-it",
         "title": "Writing and proving a fix",
-        "summary": "Run tainted fix to interview you about the fix, write the code, and re-prove the hole is closed.",
+        "summary": "Run tainted fix to interview you about the fix and write the code, then prove it again to see the hole closed.",
         "steps": [
             {
                 "heading": "Name the hole you want fixed",
@@ -194,13 +194,14 @@ LESSONS: list[dict] = [
                 "command": "tainted fix ./my-app --finding-id 1db5cbc5350811b5 --apply",
             },
             {
-                "heading": "Re-prove the hole is closed",
-                "body": "To verify the fix actually stops the attack, give fix a running target with --url and credentials: --login-a and --login-b. Tainted re-runs the attack after writing the fix. It then shows Re-verification with two assertions: FIXED means the attack failed and the real owner still has access. BROKE IT SAFELY means the attack failed but you also accidentally locked out the owner, which is a mistake. NOT FIXED means the attack still works, and the fix did not help.",
-                "command": "tainted fix ./my-app --finding-id 1db5cbc5350811b5 --apply --url http://localhost:3000 --login-a a@test.com:password --login-b b@test.com:password",
+                "heading": "Verify it with prove",
+                "body": "fix does not re-run the attack: beside a patch nobody has applied yet, the attack would only find the hole again. Apply the fix, restart your app, and run the same prove as before. The fix holds when the finding comes back as not reproduced. prove also asks for the same record as account A, so a fix that locks the owner out too is reported as unproven, not as held.",
+                "command": "tainted prove ./my-app --url http://localhost:3000 --login-a a@test.com:password --login-b b@test.com:password --seed notes:5",
+                "expect": "The finding no longer appears among the proven. If it reads unproven because account A was refused as well, the fix went too far.",
             },
             {
-                "heading": "Handle test failure",
-                "body": "If the re-verification fails, the exit code is 1. Review the failed assertions and edit the file by hand. Tainted tells you what went wrong. After you fix it, run tainted prove to confirm the hole is closed.",
+                "heading": "An agent fix is checked on the spot",
+                "body": "agent_injection is the exception. Its fix reshapes the agent graph, so Tainted rebuilds the graph the fix leaves and checks it right away: no agent may still hold both tools, and the pairing must not have moved to another agent. A fix that keeps both tools behind a gate is reported, not fixed, because the gate runs in your runtime. If a check fails, the exit code is 1.",
             },
         ],
     },

@@ -696,8 +696,7 @@ def demo_fix_result(
     return FixResult(
         finding=Finding(candidate=candidate),
         edits=edits,
-        notes=notes + " (patch-only: the website has no working tree, so the loop does not "
-        "close here — the CLI and CI surfaces re-prove after applying.)",
+        notes=notes + " (patch-only: apply it, deploy it, and prove again to see the hole closed.)",
         metadata={"demo": True},
     )
 

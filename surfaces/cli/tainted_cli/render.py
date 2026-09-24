@@ -154,31 +154,26 @@ def _render_coverage(report: Report) -> None:
 
 
 def render_reverification(fix_result) -> None:
-    """Shows both assertions side by side. 'fixed' and 'broke it safely' must look different."""
-    console.print("\n[bold]Re-verification[/bold]")
+    """The check `fix` can make before the patch is applied: the agent graph it leaves.
+
+    Request-plane fixes carry no assertions; they are verified by `prove` once applied.
+    """
+    console.print("\n[bold]Re-check of the graph the fix leaves[/bold]")
     for a in fix_result.assertions:
         mark = "[green]PASS[/green]" if a.passed else "[red]FAIL[/red]"
         console.print(f"  {mark} {_e(a.name)}: [dim]{_e(a.detail)}[/dim]")
 
     status = fix_result.resulting_status.value
-    tool_plane = any(a.name == "hole_did_not_relocate" for a in fix_result.assertions)
-    if status == "fixed" and tool_plane:
+    if status == "fixed":
         console.print(
             "\n[bold green]FIXED[/bold green]. No agent holds both tools any more, and the "
             "pairing did not move to another one."
         )
-    elif status == "reported" and tool_plane and fix_result.all_assertions_passed:
+    elif status == "reported" and fix_result.all_assertions_passed:
         console.print(
             "\n[bold yellow]GATED, UNPROVEN[/bold yellow]. The agent keeps both tools and the "
             "gate covers every sink, on paper. The gate runs in your runtime, which Tainted "
             "cannot execute, so no attack has shown it holds."
-        )
-    elif status == "fixed":
-        console.print("\n[bold green]FIXED[/bold green]. The attack fails now. The owner still has access.")
-    elif status == "broke_it_safely":
-        console.print(
-            "\n[bold yellow]BROKE IT SAFELY[/bold yellow]. The attack fails. The real owner "
-            "lost access too."
         )
     else:
         console.print(f"\n[bold red]NOT FIXED[/bold red]: {status}.")

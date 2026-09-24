@@ -59,13 +59,13 @@ def test_a_plan_permits_the_probes_and_refuses_anything_else():
     assert not plan.permits("POST", {"url": "http://localhost:54321/auth/v1/signup"})
 
 
-def test_a_plan_commits_the_method_of_a_write_route():
-    """A BOLA candidate on a DELETE route is probed with DELETE. Committing GET alone refused
-    that probe and aborted the whole run as if the guard had caught an exfiltration."""
+def test_a_plan_commits_no_write_to_the_app():
+    """Live proof sends only reads; a probe on a write route is built and held, never sent. A
+    committed write verb would only matter if a probe escaped that hold, so none is committed."""
     plan = build_probe_plan(setup(url="http://localhost:3000"))
-    for method in ("POST", "PUT", "PATCH", "DELETE"):
-        assert plan.permits(method, {"url": "http://localhost:3000/api/invoices/1043"})
-    assert not plan.permits("DELETE", {"url": "https://attacker.test/api/invoices/1043"})
+    assert plan.permits("GET", {"url": "http://localhost:3000/api/invoices/1043"})
+    for method in ("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
+        assert not plan.permits(method, {"url": "http://localhost:3000/api/invoices/1043"})
 
 
 # --------------------------------------------------------------------------- #

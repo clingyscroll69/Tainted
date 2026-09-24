@@ -23,7 +23,7 @@ from tainted.dynamic.sandbox import run_sandbox
 from tainted.dynamic.target import ProveSetup, Target
 from tainted.fix.deterministic import generate_rls_fix
 from tainted.fix.interview import InterviewAnswer, resolve_tool_plane_fix
-from tainted.fix.reverify import reverify_request_plane, reverify_tool_plane
+from tainted.fix.reverify import reverify_tool_plane
 from tainted.fix.tool_plane_fix import generate_tool_plane_fix
 from tainted.llm.client import LLMClient, LLMUnavailable
 from tainted.models import (
@@ -384,21 +384,20 @@ def _unprovable(candidate: Candidate, why: str) -> Finding:
 # --------------------------------------------------------------------------- #
 def fix(
     finding: Finding,
-    setup: Optional[ProveSetup] = None,
-    replay_after: Optional[SupabaseReplay] = None,
     answers: Optional[list[InterviewAnswer]] = None,
     repo_path: Optional[str] = None,
-    prober: Optional[RouteProber] = None,
 ) -> FixResult:
-    """Write the remediation and re-verify it by the loop the finding's plane requires.
+    """Write the remediation, and check it where a check before applying it means anything.
 
     Three shapes, decided by one question — what does the correct fix depend on that the code
     doesn't contain?
 
       * **Nothing** (request plane, classic injection): the code determines the fix. Written
-        directly, re-verified by *re-proving* — the surface didn't move, so the old exploit is
-        still aimed correctly and simply now fails. Two assertions: the attack fails AND
-        legitimate access survives.
+        directly and handed back as a patch. It is verified by `prove` once it is applied and
+        deployed: the surface didn't move, so the same attack is still aimed correctly and
+        should now fail, and `prove` asks as the owner too, so a fix that locks everyone out
+        does not read as held. Re-running the attack here, beside a patch nobody has applied,
+        would only re-find the hole.
       * **User intent about structure** (tool plane): which of four remediations is right isn't
         in the code. Requires `answers` from the interview. Re-verified by rebuilding the agent
         graph as the fix leaves it and looking for the pairing again, because the fix reshapes
@@ -408,7 +407,7 @@ def fix(
         current behavior is intended, so this returns the question, never an auto-written test.
     """
     if finding.check in (Check.BOLA, Check.RLS):
-        return _fix_request_plane(finding, setup, replay_after, prober)
+        return _fix_request_plane(finding)
     if finding.check is Check.AGENT_INJECTION:
         return _fix_tool_plane(finding, answers, repo_path)
     if finding.check is Check.TEST_INTEGRITY:
@@ -418,25 +417,21 @@ def fix(
     raise NotImplementedError(f"No fix strategy for {finding.check}.")
 
 
-def _fix_request_plane(
-    finding: Finding,
-    setup: Optional[ProveSetup],
-    replay_after: Optional[SupabaseReplay],
-    prober: Optional[RouteProber],
-) -> FixResult:
+# How every deterministic patch is checked: by the attack it closes, once it is live.
+VERIFY_BY_PROVE = (
+    "To verify it, apply it, deploy it, and run `prove` against the same target: the fix "
+    "holds when the attack no longer succeeds and the owner still reads their own record."
+)
+
+
+def _fix_request_plane(finding: Finding) -> FixResult:
     from tainted.fix.deterministic import generate_bola_fix
 
     if finding.check is Check.BOLA and finding.candidate.metadata.get("route_path"):
         edits, note, _complete = generate_bola_fix(finding.candidate)
     else:
         edits, note, _complete = generate_rls_fix(finding.candidate)
-    result = FixResult(finding=finding, edits=edits, notes=note)
-
-    if setup is not None and replay_after is not None:
-        reverify_request_plane(result, setup, replay_after, prober=prober)
-    else:
-        result.notes += " (patch-only: no target given, so the loop is not closed)"
-    return result
+    return FixResult(finding=finding, edits=edits, notes=note + " " + VERIFY_BY_PROVE)
 
 
 def _fix_tool_plane(
@@ -477,4 +472,8 @@ def _fix_classic_injection(finding: Finding) -> FixResult:
     from tainted.fix.deterministic import generate_injection_fix
 
     edits, note = generate_injection_fix(finding.candidate)
+    # Only SQL injection is fired live, so only its fix can be verified by `prove`. Command
+    # and template injection are held at demonstration either side of the fix.
+    if finding.candidate.metadata.get("kind", "sql") == "sql":
+        note += " " + VERIFY_BY_PROVE
     return FixResult(finding=finding, edits=edits, notes=note)

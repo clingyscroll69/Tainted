@@ -20,7 +20,7 @@ from typing import Optional
 
 import httpx
 
-from tainted.dynamic.route_probes import RouteProber
+from tainted.dynamic.route_probes import RouteProber, held_write, is_readable, send_verb
 from tainted.dynamic.target import ProveSetup
 from tainted.models import (
     Candidate,
@@ -74,6 +74,14 @@ def prove_sql_injection(
 
     prober = prober or RouteProber(setup)
     method = candidate.metadata.get("method") or "GET"
+    if not is_readable(method):
+        return held_write(
+            candidate,
+            "sql_injection",
+            method,
+            prober.build_url(route_path, TAUTOLOGY_PAYLOAD),
+            payload=TAUTOLOGY_PAYLOAD,
+        )
 
     try:
         benign = prober.request(
@@ -94,7 +102,7 @@ def prove_sql_injection(
             f"Sent `{TAUTOLOGY_PAYLOAD}` where `{BENIGN_VALUE}` belongs, at "
             f"{method} {route_path}, and compared the responses."
         ),
-        method=method if method != "*" else "GET",
+        method=send_verb(method),
         url=str(crafted.request.url),
         payload=TAUTOLOGY_PAYLOAD,
         executed=True,

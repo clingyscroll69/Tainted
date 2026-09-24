@@ -43,7 +43,8 @@ jobs:
           # Every check runs by default except test_integrity. Narrow with `only`/`skip`, e.g.
           # only: bola,rls
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
-          # Opens one PR carrying the fixes this run proved, each re-proved against the same
-          # preview. Needs `contents: write` above, and a token that can push.
+          # Opens one PR carrying the fixes for what this run proved. That PR's own run proves
+          # them against its own preview. Needs `contents: write` above, and a token that can
+          # push and start workflows.
           fix: "false"
           github-token: ${{ github.token }}

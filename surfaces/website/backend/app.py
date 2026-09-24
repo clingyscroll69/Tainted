@@ -747,9 +747,8 @@ def _analysis_for(repo_path: str, llm) -> AnalysisResult:
 def api_fix(req: FixRequest, request: Request):
     """Website degrades to patch-generation: it hands back the diff; the developer applies it.
 
-    The loop cannot close here — there is no working tree to apply into and re-prove against —
-    so this surface recommends and the developer applies. That is a property of the surface,
-    not a missing feature, and the response says so rather than implying a fix was verified.
+    Every surface does the same for a request-plane fix: the patch is verified by applying it
+    and proving again, not before. The response says so rather than implying a fix was verified.
     """
     if demo_mode.is_demo(req.repo_path, req.repo):
         try:

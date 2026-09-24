@@ -30,7 +30,7 @@ def make_setup(**overrides) -> ProveSetup:
         target=Target(url="http://localhost:3000"),
         account_a=Account(label="A", email="a@x.com", password="pw", access_token="tok-A"),
         account_b=Account(label="B", email="b@x.com", password="pw", access_token="tok-B"),
-        seed=SeedRecord(table="invoices", id=SEED_ID, route_path="/api/invoices/[id]"),
+        seed=SeedRecord(table="invoices", id=SEED_ID),
     )
     base.update(overrides)
     return ProveSetup(**base)
@@ -89,6 +89,8 @@ def test_route_bola_does_not_call_a_403_a_leak():
     """A 403 that echoes the requested id back is a denial, not a disclosure."""
 
     def handler(request):
+        if request.headers.get("authorization") == "Bearer tok-A":
+            return httpx.Response(200, json={"id": SEED_ID})
         return httpx.Response(403, json={"error": "forbidden", "requested": SEED_ID})
 
     finding = _prober(handler).prove_route_bola(bola_candidate())
@@ -99,6 +101,8 @@ def test_route_bola_does_not_call_a_200_error_envelope_a_leak():
     """Plenty of apps return errors with a 200. The id appearing is not enough."""
 
     def handler(request):
+        if request.headers.get("authorization") == "Bearer tok-A":
+            return httpx.Response(200, json={"id": SEED_ID})
         return httpx.Response(200, json={"error": "not found", "id": SEED_ID})
 
     finding = _prober(handler).prove_route_bola(bola_candidate())
@@ -118,17 +122,31 @@ def test_route_bola_without_a_seed_says_what_is_missing():
     assert "No seed record" in finding.proof.notes
 
 
-def test_legitimate_access_check_uses_the_same_route_the_leak_used():
+def test_a_refused_attack_counts_as_held_only_if_the_owner_gets_in():
+    """The control: B refused and A served is a route that checked ownership."""
     seen = []
 
     def handler(request):
-        seen.append(request.headers.get("authorization"))
-        return httpx.Response(200, json={"id": SEED_ID})
+        token = request.headers.get("authorization")
+        seen.append(token)
+        if token == "Bearer tok-A":
+            return httpx.Response(200, json={"id": SEED_ID})
+        return httpx.Response(403, json={"error": "forbidden"})
 
-    ok, detail = _prober(handler).legitimate_access_survives()
-    assert ok is True
-    assert seen == ["Bearer tok-A"]  # asked as A, not as B
-    assert "still reads its own record" in detail
+    finding = _prober(handler).prove_route_bola(bola_candidate())
+    assert finding.status == FindingStatus.NOT_REPRODUCED
+    assert seen == ["Bearer tok-B", "Bearer tok-A"]
+    assert "still reads its own record" in finding.proof.notes
+
+
+def test_a_route_that_refuses_everyone_proves_nothing():
+    """Refusing the owner too is not a check that held: a wrong route, a dead record, or a
+    fix that locked everyone out. Reading it as held was a false all-clear."""
+    finding = _prober(lambda r: httpx.Response(404, json={"error": "not found"})).prove_route_bola(
+        bola_candidate()
+    )
+    assert finding.status == FindingStatus.REPORTED
+    assert "proves nothing" in finding.proof.notes
 
 
 # --------------------------------------------------------------------------- #
@@ -265,3 +283,49 @@ def test_assets_and_telemetry_are_not_treated_as_data_calls():
     assert CapturedRequest("GET", "https://app.test/_next/static/chunk.js").is_data_call is False
     assert CapturedRequest("GET", "https://www.google-analytics.com/g").is_data_call is False
     assert CapturedRequest("GET", "https://app.test/api/invoices").is_data_call is True
+
+
+# --------------------------------------------------------------------------- #
+# Live proof sends reads only
+#
+# A route's method is what its handler runs. Proving BOLA on a DELETE route by sending DELETE
+# deletes A's record; a tautology sent to a PUT handler can widen the write to every row.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("method", ["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
+def test_a_bola_probe_on_a_write_route_is_built_and_never_sent(method):
+    sent = []
+
+    def handler(request):
+        sent.append(request.method)
+        return httpx.Response(200, json={"id": SEED_ID})
+
+    finding = _prober(handler).prove_route_bola(bola_candidate(method=method))
+    assert sent == []
+    assert finding.status == FindingStatus.REPORTED
+    assert finding.proof.exploit.executed is False
+    assert finding.proof.exploit.method == method
+    assert SEED_ID in finding.proof.exploit.url
+
+
+def test_a_sql_probe_on_a_write_route_is_built_and_never_sent():
+    sent = []
+
+    def handler(request):
+        sent.append(request.method)
+        return httpx.Response(200, text="ok")
+
+    candidate = injection_candidate("sql")
+    candidate.metadata["method"] = "DELETE"
+    finding = prove_sql_injection(candidate, make_setup(), _prober(handler))
+    assert sent == []
+    assert finding.status == FindingStatus.REPORTED
+    assert finding.proof.exploit.executed is False
+    assert finding.proof.exploit.payload
+
+
+def test_the_prober_refuses_to_send_a_write_even_when_asked_directly():
+    """The backstop: a future probe that forgets to hold a write still cannot send one."""
+    with pytest.raises(ValueError):
+        _prober(lambda r: httpx.Response(200)).request(
+            "DELETE", "http://localhost:3000/api/x", make_setup().account_b
+        )

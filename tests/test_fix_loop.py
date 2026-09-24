@@ -1,8 +1,8 @@
-"""The fix loop: deterministic RLS fix + re-prove with two assertions.
+"""The fix loop: a deterministic RLS fix, verified by proving again once it is live.
 
 Uses two mock PostgREST servers: one *before* the fix (leaks A's row to B) and one *after* the
-fix migration is applied (B is denied, A still reads A's own row). The re-verify must flip the
-finding to FIXED only when both assertions hold.
+fix migration is applied (B is denied, A still reads A's own row). `fix` writes the patch and
+claims nothing about it; `prove` against the fixed target is what shows the hole closed.
 """
 
 from __future__ import annotations
@@ -83,40 +83,20 @@ def test_deterministic_fix_generates_scoped_policy():
     assert 'drop policy if exists "invoices readable"' in sql  # replaces the permissive one
 
 
-def test_fix_reproves_closed_with_both_assertions():
-    setup = _setup()
-    # Sanity: before the fix, the attack is proven.
-    before = prove_candidate(_candidate(), setup, _replay(_before_handler))
+def test_fix_is_a_patch_and_names_prove_as_its_verification():
+    """Re-running the attack beside an unapplied patch only re-finds the hole, so fix doesn't."""
+    before = prove_candidate(_candidate(), _setup(), _replay(_before_handler))
     assert before.status == FindingStatus.PROVEN
 
-    # Apply the fix and re-verify against the fixed target.
-    result = fix(before, setup=setup, replay_after=_replay(_after_handler))
-
-    assert result.resulting_status == FindingStatus.FIXED
-    assert result.all_assertions_passed
-    names = {a.name: a.passed for a in result.assertions}
-    assert names["attack_now_fails"] is True
-    assert names["legitimate_access_survives"] is True
-
-
-def test_fix_that_locks_out_owner_is_broke_it_safely():
-    setup = _setup()
-    before = prove_candidate(_candidate(), setup, _replay(_before_handler))
-
-    def _overzealous(request):
-        # Denies EVERYONE, including the legitimate owner A.
-        if request.url.path == "/rest/v1/invoices":
-            return httpx.Response(200, json=[])
-        return httpx.Response(404, json=[])
-
-    result = fix(before, setup=setup, replay_after=_replay(_overzealous))
-    assert result.resulting_status == FindingStatus.BROKE_IT_SAFELY
-    assert result.all_assertions_passed is False
-
-
-def test_patch_only_when_no_target():
-    before = prove_candidate(_candidate(), _setup(), _replay(_before_handler))
-    result = fix(before)  # no setup/replay -> website-style patch-only mode
+    result = fix(before)
     assert result.edits
     assert not result.assertions
-    assert "patch-only" in result.notes
+    assert result.resulting_status is FindingStatus.CANDIDATE
+    assert "run `prove`" in result.notes
+
+
+def test_proving_again_once_the_fix_is_live_shows_the_hole_closed():
+    before = prove_candidate(_candidate(), _setup(), _replay(_before_handler))
+    fix(before)  # the patch, applied and deployed as `_after_handler`
+    after = prove_candidate(_candidate(), _setup(), _replay(_after_handler))
+    assert after.status is FindingStatus.NOT_REPRODUCED

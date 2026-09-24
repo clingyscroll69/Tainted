@@ -12,7 +12,8 @@ Configuration is by environment (so it works uniformly in GitHub Actions and Git
   TAINTED_ONLY           comma-separated checks to run, and nothing else (test_integrity is
                          opt-in: it runs only when named here)
   TAINTED_SKIP           comma-separated checks to leave out
-  TAINTED_FIX            "1" to open a PR with the deterministic fixes, re-proved
+  TAINTED_FIX            "1" to open a PR with the deterministic fixes; the PR's own
+                         preview deploy re-proves them
   TAINTED_TUTORIAL       "1" to print the setup walkthrough and exit without scanning
                          (or a topic slug, to print just that lesson)
   GITHUB_STEP_SUMMARY    if set, the markdown report is appended there
@@ -134,8 +135,8 @@ def run() -> int:
         else:
             prove_note = f"prove refused: ownership not verified ({detail})"
 
-    # The loop CI can close that no other surface can: write the fix, re-prove it against this
-    # PR's own preview deploy, and propose it as a reviewable change.
+    # Write the fix and propose it as a reviewable change. Its proof comes from its own preview:
+    # the fix PR's CI deploys the patched app and this job proves against it again.
     fix_note = ""
     if os.environ.get("TAINTED_FIX", "").lower() in ("1", "true", "yes") and findings:
         fix_note = _open_fix_pr(repo, findings, setup)
@@ -177,9 +178,8 @@ def _gap(setup: ProveSetup | None, findings, prove_note: str) -> str:
 
 
 def _open_fix_pr(repo: str, findings, setup) -> str:
-    """Generate deterministic fixes, re-prove them, and open one PR carrying the evidence."""
+    """Generate deterministic fixes and open one PR carrying the evidence of the hole."""
     from tainted import fix as core_fix
-    from tainted.dynamic.replay import SupabaseReplay
     from tainted_ci.pull_request import eligible, open_pull_request
 
     targets = eligible(findings)
@@ -190,17 +190,9 @@ def _open_fix_pr(repo: str, findings, setup) -> str:
             "interview first.</sub>"
         )
 
-    fixes = []
-    for finding in targets:
-        # The re-prove runs against the same preview this PR already deploys, which is why CI
-        # is the surface where the loop actually closes.
-        fixes.append(
-            core_fix(
-                finding,
-                setup=setup,
-                replay_after=SupabaseReplay(setup.target) if setup else None,
-            )
-        )
+    # Not re-proved here: this run's preview is the unfixed app, so the attack would only
+    # succeed again. The fix PR's own preview is the patched app, and its run is the proof.
+    fixes = [core_fix(finding) for finding in targets]
 
     try:
         result = open_pull_request(repo, findings, fixes)

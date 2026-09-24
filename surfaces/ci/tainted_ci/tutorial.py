@@ -139,11 +139,11 @@ TAINTED_LOGIN_B: user2@example.com:password456""",
     {
         "topic": "auto-fix-pr",
         "title": "Auto-propose fixes as a PR",
-        "summary": "Set TAINTED_FIX to open a pull request with proven fixes, re-proved against your preview.",
+        "summary": "Set TAINTED_FIX to open a pull request with fixes for proven holes; its own preview deploy proves them.",
         "steps": [
             {
                 "heading": "Enable auto-fix",
-                "body": "Set TAINTED_FIX to 1 (or true, or yes). After prove runs and finds eligible findings, Tainted generates fixes, writes them to a new branch, and opens a PR. The PR body shows the original attack and re-verification that the hole is patched.",
+                "body": "Set TAINTED_FIX to 1 (or true, or yes). After prove runs and finds eligible findings, Tainted generates fixes, writes them to a new branch, and opens a PR. The PR body shows the request that proved each hole.",
             },
             {
                 "heading": "Understand eligible fixes",
@@ -152,15 +152,16 @@ TAINTED_LOGIN_B: user2@example.com:password456""",
             },
             {
                 "heading": "What a fix PR contains",
-                "body": "The branch name is tainted/fix-CHECKS-RUNID (for example tainted/fix-bola-12345). Tainted creates the branch, commits the fixes, pushes, and opens a PR. The body shows the request that proved the hole and assertions verifying the fix worked.",
+                "body": "The branch name is tainted/fix-CHECKS-RUNID (for example tainted/fix-bola-12345). Tainted creates the branch, commits the fixes, pushes, and opens a PR. The body shows the request that proved the hole and explains how the fix will be proved.",
             },
             {
                 "heading": "The loop",
-                "body": "CI is the only surface where this loop closes: Tainted writes the fix, re-proves against this PR's own preview deploy, and proposes it as a reviewable change. No other surface has a working tree and a live target at the same time.",
+                "body": "The run that opens the PR does not re-prove the fix: its preview is the unfixed app, so the attack would only succeed again. The PR's own CI run deploys the patched app, and Tainted sends the same attacks there. The fix holds when each is refused and each owner still reads their own record; a fix that refuses the owner too reads as unproven, not fixed.",
             },
             {
-                "heading": "Verify re-proof",
-                "body": "The PR body includes checkmarks for each re-verification. Green means the attack failed (the hole is patched). Red means the fix did not work. If a fix broke legitimate access (blocks the attacker and the owner), it shows as secure-but-broken and you should not merge as-is.",
+                "heading": "Let the PR start its own run",
+                "body": "A pull request opened with the default GITHUB_TOKEN does not trigger workflows, so its proof never runs. Pass a personal access token or a GitHub App token as github-token, or push a commit to the branch yourself.",
+                "command": "github-token: ${{ secrets.TAINTED_PR_TOKEN }}",
             },
             {
                 "heading": "Review and merge",

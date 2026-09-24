@@ -22,7 +22,7 @@ from tainted.fix.interview import (
     tool_plane_interview,
 )
 from tainted.fix.paths import edit_target, safe_segment
-from tainted.fix.reverify import reverify_request_plane, reverify_tool_plane
+from tainted.fix.reverify import reverify_tool_plane
 from tainted.fix.tool_plane_fix import generate_tool_plane_fix
 
 __all__ = [
@@ -32,7 +32,6 @@ __all__ = [
     "generate_tool_plane_fix",
     "edit_target",
     "safe_segment",
-    "reverify_request_plane",
     "reverify_tool_plane",
     "tool_plane_interview",
     "resolve_tool_plane_fix",

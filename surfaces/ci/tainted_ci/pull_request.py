@@ -159,12 +159,20 @@ def _commit_message(findings: list[Finding]) -> str:
 
 
 def pr_body(findings: list[Finding], fixes: list[FixResult]) -> str:
-    """The PR body: what was open, the request that proved it, and what the fix re-proved."""
+    """The PR body: what was open, the request that proved it, and how the fix gets proved."""
     lines = [
         "## 🩸 Tainted — proven findings, with fixes",
         "",
-        "Each finding below was **proven by carrying out the attack** against this PR's preview "
-        "deployment, not inferred. The fix is then re-verified against the same target.",
+        "Each finding below was **proven by carrying out the attack** against the preview "
+        "deployment of the change that opened it, not inferred.",
+        "",
+        "**This PR's own preview deploy is the proof of the fix.** When CI runs here, Tainted "
+        "sends the same attacks to the patched app: each one should now be refused, and each "
+        "owner should still read their own record. Nothing here was re-checked before that, "
+        "because the preview that proved the hole is the unfixed app.",
+        "",
+        "> A PR opened with the default `GITHUB_TOKEN` does not trigger workflows. If no run "
+        "starts here, push a commit or reopen it with a token that can.",
         "",
     ]
     fix_by_title = {f.finding.candidate.title: f for f in fixes}
@@ -192,28 +200,15 @@ def pr_body(findings: list[Finding], fixes: list[FixResult]) -> str:
             ]
 
         fix = fix_by_title.get(cand.title)
-        if fix and fix.assertions:
-            lines.append("**Re-verification**")
-            lines.append("")
-            for a in fix.assertions:
-                mark = "✅" if a.passed else "❌"
-                lines.append(f"- {mark} `{a.name}` — {a.detail}")
-            lines.append("")
-            if fix.resulting_status is FindingStatus.BROKE_IT_SAFELY:
-                lines.append(
-                    "> ⚠️ **The attack is blocked but legitimate access broke too.** Secure and "
-                    "broken. Do not merge as-is."
-                )
-                lines.append("")
-        elif fix:
+        if fix and fix.notes:
             lines.append(f"_{fix.notes}_")
             lines.append("")
 
     lines += [
         "---",
         "",
-        "<sub>Both assertions matter: a policy that blocks the attacker *and* the real owner "
-        "is secure and broken, so Tainted checks that account A can still read its own record "
-        "before calling anything fixed.</sub>",
+        "<sub>The re-proof checks two things: the attack is refused, *and* account A still "
+        "reads its own record. A fix that refuses everyone is secure and broken, and reads as "
+        "unproven, not fixed.</sub>",
     ]
     return "\n".join(lines)

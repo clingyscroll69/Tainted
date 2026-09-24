@@ -64,9 +64,12 @@ signature, the report says so instead of pretending it checked.
 ## Auto-fix PR
 
 `fix: "true"` (or `TAINTED_FIX=1`) takes every finding this run *proved* whose repair the code
-fully determines, writes it, re-proves it against this same preview, and opens one PR carrying
-the evidence. Tool-plane findings are reported, never auto-fixed — their repair depends on
-answers only a person has.
+fully determines, writes it, and opens one PR carrying the request that proved each hole. It
+is not re-proved in the run that opens the PR: that run's preview is the unfixed app, where the
+attack only succeeds again. The PR's own CI run is the proof — its preview is the patched app,
+and Tainted sends the same attacks there, as B and as the owner. A PR opened with the default
+`GITHUB_TOKEN` starts no workflow, so pass a token that can. Tool-plane findings are reported,
+never auto-fixed — their repair depends on answers only a person has.
 
 It needs `permissions: contents: write` and a `github-token`, and it shells out to `git` and
 `gh`; the action's image installs both.

@@ -35,6 +35,53 @@ _PARAM_TOKEN = re.compile(r"\[\.{0,3}(\w+)\]|:(\w+)|\{(\w+)\}|<(?:[^:>]+:)?([^>]
 
 _MAX_BODY = 2000
 
+# The one verb live proof sends to an app route. A route's own method is what the handler runs,
+# so firing a BOLA probe at `DELETE /api/invoices/:id` deletes account A's record to prove B
+# could, and a SQL tautology sent to a DELETE or PUT handler can widen the write to the whole
+# table. Proof has to be reversible, so anything but a read is built and held, never sent.
+# HEAD is safe too, but its response has no body to carry the record, so it proves nothing
+# and would read as "the route held" when it was never really asked.
+READ_METHOD = "GET"
+
+
+def send_verb(method: Optional[str]) -> str:
+    """The verb a route's declared method is sent as. A catch-all (`*`) is sent as a read."""
+    return method.upper() if method and method != "*" else READ_METHOD
+
+
+def is_readable(method: Optional[str]) -> bool:
+    """Whether live proof may send this route's method at all."""
+    return send_verb(method) == READ_METHOD
+
+
+def held_write(candidate: Candidate, kind: str, method: str, url: str, payload=None) -> Finding:
+    """A probe on a write route: built in full, deliberately not sent."""
+    verb = send_verb(method)
+    finding = Finding(candidate=candidate, status=FindingStatus.REPORTED)
+    finding.proof = ProbeResult(
+        succeeded=False,
+        kind=kind,
+        exploit=Exploit(
+            description=(
+                f"Built, not sent: {verb} {url} as account B. Tainted sends only reads to a "
+                f"live app, because this request would run the route's own write."
+            ),
+            method=verb,
+            url=url,
+            payload=payload,
+            executed=False,
+        ),
+        notes=(
+            f"This route handles {verb}, which changes data. Sending it to prove the hole "
+            f"would do the damage the hole allows, so the request is held. Prove it against a "
+            f"disposable database, or read the handler."
+        ),
+    )
+    finding.provenance.append(
+        Provenance(origin=Register.STRUCTURE, detail=f"held: {verb} is not sent by live proof")
+    )
+    return finding
+
 
 def _redact(token: Optional[str]) -> str:
     if not token:
@@ -91,8 +138,12 @@ class RouteProber:
     def request(
         self, method: str, url: str, account: Account, **kwargs
     ) -> httpx.Response:
+        verb = send_verb(method)
+        if verb != READ_METHOD:
+            # The callers hold writes before they get here; this is the backstop, so no future
+            # probe can send one by forgetting to ask.
+            raise ValueError(f"live proof sends only {READ_METHOD}, never {verb}")
         self._authenticate(account)
-        verb = "GET" if method in ("*", "") else method.upper()
         return self._client.request(
             verb, url, headers=self._headers(account), **kwargs
         )
@@ -128,6 +179,8 @@ class RouteProber:
             return finding
 
         url = self.build_url(route_path, seed.id)
+        if not is_readable(method):
+            return held_write(candidate, "route_bola", method, url)
         try:
             resp = self.request(method, url, self.setup.account_b)
         except httpx.HTTPError as exc:
@@ -145,7 +198,7 @@ class RouteProber:
                 f"Account {self.setup.account_b.label} requested account "
                 f"{self.setup.account_a.label}'s record `{seed.id}` via {method} {route_path}."
             ),
-            method=method if method != "*" else "GET",
+            method=send_verb(method),
             url=url,
             headers={
                 k: (_redact(v.split(" ", 1)[-1]) if k.lower() == "authorization" else v)
@@ -163,8 +216,7 @@ class RouteProber:
                 f"{self.setup.account_b.label} received {self.setup.account_a.label}'s record "
                 f"through the app's own route."
                 if leaked
-                else f"Route returned {resp.status_code} without A's record. Either the check "
-                f"held or the record does not exist."
+                else f"Route returned {resp.status_code} without A's record to B."
             ),
         )
         if leaked:
@@ -172,9 +224,30 @@ class RouteProber:
             finding.provenance.append(
                 Provenance(origin=Register.PROOF, detail="live probe: route_bola")
             )
-        else:
-            finding.status = FindingStatus.NOT_REPRODUCED
+            return finding
+
+        # B was refused. That means the route checked ownership only if the owner is *not*
+        # refused: a route that answers no one (wrong path, dead record, a fix that locked
+        # everyone out) refuses B too, and calling that "held" would be a false all-clear.
+        owner_ok, owner_detail = self._owner_reads(url, seed.id)
+        finding.proof.notes += " " + owner_detail
+        finding.status = FindingStatus.NOT_REPRODUCED if owner_ok else FindingStatus.REPORTED
         return finding
+
+    def _owner_reads(self, url: str, seed_id: str) -> tuple[bool, str]:
+        """The control: account A requests its own record through the same URL."""
+        a = self.setup.account_a.label
+        try:
+            resp = self.request(READ_METHOD, url, self.setup.account_a)
+        except httpx.HTTPError as exc:
+            return False, f"Account {a}'s own request failed ({exc}), so the refusal proves nothing."
+        if self._response_carries_seed(resp, seed_id):
+            return True, f"Account {a} still reads its own record there, so the route checked."
+        return False, (
+            f"Account {a} cannot read its own record there either (status {resp.status_code}). "
+            f"Nobody was let in, so the refusal proves nothing; if you just applied a fix, it "
+            f"locked out the owner too."
+        )
 
     def _response_carries_seed(self, resp: httpx.Response, seed_id: str) -> bool:
         """A leak is the seed's own id coming back in a successful response.
@@ -195,27 +268,6 @@ class RouteProber:
         ):
             return False
         return True
-
-    # ------------------------------------------------------------------ #
-    def legitimate_access_survives(self) -> tuple[bool, str]:
-        """As account A, fetch A's own record through the same route it was leaked from."""
-        seed = self.setup.seed
-        if seed is None:
-            return True, "No seed record supplied — legitimacy check skipped."
-        route_path = seed.route_path
-        if not route_path:
-            return True, "No route recorded for the seed — legitimacy check skipped."
-        url = self.build_url(route_path, seed.id)
-        try:
-            resp = self.request("GET", url, self.setup.account_a)
-        except httpx.HTTPError as exc:
-            return False, f"Account A's own request failed after the fix: {exc}"
-        if self._response_carries_seed(resp, seed.id):
-            return True, f"Account {self.setup.account_a.label} still reads its own record."
-        return False, (
-            f"Account {self.setup.account_a.label} can no longer read its own record "
-            f"(status {resp.status_code}) — the fix broke legitimate access."
-        )
 
     def close(self) -> None:
         self._client.close()
