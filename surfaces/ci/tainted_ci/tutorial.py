@@ -181,11 +181,11 @@ env:
     {
         "topic": "choose-checks",
         "title": "Choose which checks run",
-        "summary": "Learn what each of the five checks needs to be proved in CI, and narrow the run with only and skip.",
+        "summary": "Learn what each of the six checks needs to be proved in CI, and narrow the run with only and skip.",
         "steps": [
             {
                 "heading": "What each check needs",
-                "body": "bola (one account reading another's record) and rls (a row policy that lets the read through) need the target URL and both logins; a seed record sharpens the probe. classic_injection (a SQL query, shell command or template built from input) needs the target URL, and login B if the route needs a sign-in; only SQL injection is fired, command and template injection are built and deliberately held. agent_injection (one agent holding a tool that reads untrusted content and a tool that acts) needs GEMINI_API_KEY, because a model has to drive the agent in the sandbox; without it the finding is reported, not proved. test_integrity runs only when you name it.",
+                "body": "bola (one account reading another's record) and rls (a row policy that lets the read through) need the target URL and both logins; a seed record sharpens the probe. classic_injection (a SQL query, shell command or template built from input) needs the target URL, and login B if the route needs a sign-in; only SQL injection is fired, command and template injection are built and deliberately held. agent_injection (one agent holding a tool that reads untrusted content and a tool that acts) needs GEMINI_API_KEY, because a model has to drive the agent in the sandbox; without it the finding is reported, not proved. tool_tenancy (one shared tool that answers whoever presents an id) is found from the tool graph and reported; proving it needs two tenant credentials, which CI does not collect. test_integrity runs only when you name it.",
             },
             {
                 "heading": "Narrow the run",

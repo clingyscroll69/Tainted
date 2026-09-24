@@ -31,7 +31,7 @@ window.TAINTED_TOUR = {
     {
       anchor: 'findings',
       title: 'Each observation shows a path',
-      body: 'One finding lists where a stranger\'s request entered, which check found it, and the depth: how far past the ownership boundary it reached. The depth is a ranking, not a distance. The deeper the mark, the more it had to get through. Five checks, one layer of the descent each, shallowest first: test_integrity, a line no test notices changing; classic_injection, a query or command built from input; agent_injection, one agent that can both read untrusted content and act on it; bola, another user\'s record reached with your own token; rls, a row policy that lets the read through.'
+      body: 'One finding lists where a stranger\'s request entered, which check found it, and the depth: how far past the ownership boundary it reached. The depth is a ranking, not a distance. The deeper the mark, the more it had to get through. Six checks, one layer of the descent each, shallowest first: test_integrity, a line no test notices changing; classic_injection, a query or command built from input; agent_injection, one agent that can both read untrusted content and act on it; tool_tenancy, one shared tool that answers whoever presents an id; bola, another user\'s record reached with your own token; rls, a row policy that lets the read through.'
     },
     {
       anchor: 'hd-str',

@@ -237,7 +237,9 @@ INVARIANT_SYSTEM = (
     "of the owner's own app. You are given the rule and the routes the application actually "
     "declares. Choose a route from that list; never invent one. The request is sent as the "
     "attacking account, so assume it is authenticated as somebody who should NOT be allowed the "
-    "thing the rule forbids. State plainly what in the response would show the rule was broken. "
+    "thing the rule forbids. Only GET requests are sent to a live app, so prefer a GET route that "
+    "would show the violation; a write is built and reported, never sent. State plainly what in "
+    "the response would show the rule was broken. "
     "If no declared route could violate the rule, say so by returning an empty route."
 )
 

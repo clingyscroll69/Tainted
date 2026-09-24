@@ -63,7 +63,7 @@ def test_the_tour_says_the_demonstration_proves_nothing():
 
 
 def test_the_tour_names_every_check():
-    """Each check is a layer of the descent; a reader should meet all five before the dive."""
+    """Each check is a layer of the descent; a reader should meet every one before the dive."""
     from tainted.models import Check
 
     js = TOUR.read_text()

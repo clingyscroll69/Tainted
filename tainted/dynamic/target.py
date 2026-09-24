@@ -133,6 +133,10 @@ class SeedRecord(BaseModel):
     id: str
     id_column: str = "id"
     owner_column: Optional[str] = None  # e.g. "owner" / "user_id", when known
+    # The app route this record is reachable through, when known (e.g. "/api/invoices/[id]").
+    # Lets the positive control and the lockout check ask as A through the door B is tried at,
+    # rather than through PostgREST alone, which proves less about the app's own route.
+    route_path: Optional[str] = None
 
 
 class Target(BaseModel):

@@ -30,7 +30,7 @@ from typing import Optional
 
 import httpx
 
-from tainted.dynamic.route_probes import RouteProber
+from tainted.dynamic.route_probes import RouteProber, is_readable, send_verb
 from tainted.dynamic.target import ProveSetup
 from tainted.llm.client import LLMClient, LLMUnavailable
 from tainted.static.routes import discover_routes
@@ -219,6 +219,23 @@ def _check_one(
     method = str(spec.get("method") or "GET").upper()
     body = spec.get("body") or None
     url = prober.build_url(route_path, str(filler))
+
+    if not is_readable(method):
+        # Live proof sends only reads: firing a write to test a rule would do what the rule
+        # forbids to real data. Built and held, and never recorded as the rule holding.
+        return InvariantResult(
+            rule=rule,
+            verdict=InvariantVerdict.NOT_TESTED,
+            route_path=route_path,
+            method=send_verb(method),
+            url=url,
+            violation_marker=marker,
+            detail=(
+                f"Built, not sent: {send_verb(method)} {url} as account {setup.account_b.label}. "
+                f"Tainted sends only reads to a live app, because this request would run the "
+                f"route's own write. Test this rule against a disposable database."
+            ),
+        )
 
     kwargs: dict = {}
     if body:

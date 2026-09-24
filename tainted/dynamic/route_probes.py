@@ -249,6 +249,28 @@ class RouteProber:
             f"locked out the owner too."
         )
 
+    def legitimate_access_survives(self) -> tuple[bool, str]:
+        """As account A, read A's own seed record through the route the seed names.
+
+        Asked on its own, with no finding behind it: by the preflight's positive control and by
+        the lockout check. The probe itself asks the same question through `_owner_reads`.
+        """
+        seed = self.setup.seed
+        if seed is None:
+            return True, "No seed record supplied — legitimacy check skipped."
+        if not seed.route_path:
+            return True, "No route recorded for the seed — legitimacy check skipped."
+        a = self.setup.account_a.label
+        try:
+            resp = self.request(READ_METHOD, self.build_url(seed.route_path, seed.id), self.setup.account_a)
+        except httpx.HTTPError as exc:
+            return False, f"Account {a}'s own request failed: {exc}"
+        if self._response_carries_seed(resp, seed.id):
+            return True, f"Account {a} still reads its own record."
+        return False, (
+            f"Account {a} can no longer read its own record (status {resp.status_code})."
+        )
+
     def _response_carries_seed(self, resp: httpx.Response, seed_id: str) -> bool:
         """A leak is the seed's own id coming back in a successful response.
 

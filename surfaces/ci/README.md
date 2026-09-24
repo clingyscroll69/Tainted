@@ -26,7 +26,7 @@ runs on is the workflow's word, and every report says so.
 
 ## The checks
 
-All five run here, from the same engine as every other surface:
+All six run here, from the same engine as every other surface:
 
 | Check | Proved in CI when |
 |---|---|
@@ -34,6 +34,7 @@ All five run here, from the same engine as every other surface:
 | `rls` — a row policy lets the read through | the same |
 | `classic_injection` — a SQL query, shell command or template built from input | `target-url` (and `login-b` if the route needs a sign-in); only SQL is fired, command and template injection are built and held |
 | `agent_injection` — one agent can both read untrusted content and act | `gemini-api-key`; without it, reported from the code |
+| `tool_tenancy` — one shared tool answers whoever presents an id | never yet: found from the tool graph and reported, since proving it needs two tenant credentials CI does not collect |
 | `test_integrity` — a line no test notices changing | named in `only`, and run where the tests can run (below) |
 
 `only` and `skip` (`TAINTED_ONLY` / `TAINTED_SKIP`) take comma-separated check names; a

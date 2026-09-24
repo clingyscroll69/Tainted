@@ -236,10 +236,25 @@ def reprove(
             "the original exploit still lands", attack_blocked=False,
         )
 
+    # REPORTED from a probe means the attack was not asked, not that it failed: a write held
+    # back, no seed, an unreachable target. Only a sent-and-refused request is "blocked".
+    proof = refired.proof
+    sent = bool(proof and proof.exploit and proof.exploit.executed)
+    if refired.status is FindingStatus.REPORTED and not sent:
+        why = proof.notes if proof and proof.notes else "the probe returned no result"
+        return ReproveResult(
+            finding.candidate.id, FindingStatus.REPORTED,
+            f"the exploit was not re-fired, so nothing is known about the fix: {why}",
+            attack_blocked=False,
+        )
+
     # The attack no longer works. Is legitimate access intact?
     is_route = finding.check is Check.BOLA and finding.candidate.metadata.get("route_path")
-    if is_route and setup.seed and setup.seed.route_path:
-        legit_ok, legit_detail = prober.legitimate_access_survives()
+    if is_route:
+        # The route probe already asked as A through the same URL once B was refused: it
+        # says NOT_REPRODUCED only when A still reads the record, REPORTED when A cannot.
+        legit_ok = refired.status is FindingStatus.NOT_REPRODUCED
+        legit_detail = proof.notes if proof else ""
     else:
         legit_ok, legit_detail = _legit_via_postgrest(setup, replay)
 

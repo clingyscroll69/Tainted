@@ -139,6 +139,25 @@ def test_an_unreachable_target_is_not_tested_never_held(tmp_path):
     assert "not recorded as the rule holding" in r.detail
 
 
+def test_a_write_rule_is_built_and_held_never_sent(tmp_path):
+    """A rule the model aims at a write is not fired: sending it would do what it forbids."""
+    sent = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request.method)
+        return httpx.Response(200, json={"email": "someone@else.com"})
+
+    s = _setup()
+    llm = ScriptedLLM(
+        {"route_path": "/api/users/<user_id>", "method": "DELETE", "violation_marker": "email"}
+    )
+    report = check_invariants([RULE], _repo_with_route(tmp_path), s, llm=llm, prober=_prober(handler, s))
+    r = report.results[0]
+    assert r.verdict is InvariantVerdict.NOT_TESTED
+    assert r.method == "DELETE" and "Built, not sent" in r.detail
+    assert sent == []
+
+
 def test_no_marker_means_not_tested(tmp_path):
     """Without a definition of a violation, judging the response would be guesswork."""
     s = _setup()

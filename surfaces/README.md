@@ -52,8 +52,10 @@ folder and runs those two installs.
 
 ## The checks on each surface
 
-Five checks, one engine: `bola`, `rls`, `classic_injection`, `agent_injection`,
-`test_integrity`. Every surface finds, proves and fixes the first four. `test_integrity`
+Six checks, one engine: `bola`, `rls`, `classic_injection`, `agent_injection`,
+`tool_tenancy`, `test_integrity`. Every surface finds, proves and fixes the first four.
+`tool_tenancy` is found from the tool graph and reported: proving it needs two tenant
+credentials against a live tool backend, which no surface collects yet. `test_integrity`
 mutates the code and re-runs the repository's own test suite, so it runs only where running
 that suite is the caller's own choice:
 

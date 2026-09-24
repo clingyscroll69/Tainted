@@ -41,7 +41,7 @@ hands you the patch and you apply it yourself. An `agent_injection` fix is asked
 the first answer is a few questions (which remedy fits depends on facts only the developer
 holds), and the page sends the answers back for the patch.
 
-It runs four of the five checks. `test_integrity` mutates the code and re-runs the repository's
+It runs five of the six checks. `test_integrity` mutates the code and re-runs the repository's
 own test suite, which is executing a stranger's code on this host, so the API has no way to ask
 for it; only the demonstration shows that layer of the descent. Measure it with the CLI.
 
