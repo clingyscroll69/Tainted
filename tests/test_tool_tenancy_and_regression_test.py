@@ -156,7 +156,7 @@ def test_an_unattributable_answer_is_not_claimed_as_a_leak():
 
     class EmptyOk(FakeInvoker):
         def invoke(self, *, tool, args, identity):
-            if not args:
+            if not args or identity.label == "A":  # the owner reads it, so B's 200 is informative
                 return ToolResponse(ok=True, records=[{"id": "inv-1"}])
             return ToolResponse(ok=True, records=[], content="{}")
 
@@ -282,3 +282,15 @@ def test_jest_output_never_hands_expect_a_message(tmp_path):
     (tmp_path / "package.json").write_text(json.dumps({"devDependencies": {"jest": "^29"}}), encoding="utf-8")
     src = emit_regression_test(_proven_finding(), str(tmp_path)).source
     assert "expect(leaked).toBe(false)" in src and "expect(\n" not in src
+
+
+def test_a_supplied_record_nobody_can_read_is_reported_not_held():
+    """B refused and A refused too: the identifier is wrong, not the boundary right."""
+
+    class Nobody(FakeInvoker):
+        def invoke(self, *, tool, args, identity):
+            return ToolResponse(ok=False, error="not found")
+
+    f = prove_tool_tenancy(_candidate(), Nobody(enforces=True), A, B, record_id="inv-9")
+    assert f.status is FindingStatus.REPORTED
+    assert "could not read it either" in f.proof.notes

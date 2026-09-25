@@ -14,7 +14,7 @@ import socket
 from typing import Callable, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Account(BaseModel):
@@ -243,6 +243,66 @@ class Target(BaseModel):
         return False
 
 
+class Tenant(BaseModel):
+    """One tenant of a shared tool backend, as the backend knows them.
+
+    `headers` carry the identity (usually `Authorization`). `url` overrides the backend's
+    endpoint for this tenant alone: a stdio MCP server takes its identity from its process
+    environment rather than a header, so reaching it as two tenants means two HTTP bridges,
+    each started with one tenant's environment.
+    """
+
+    label: str
+    headers: dict[str, str] = Field(default_factory=dict)
+    url: Optional[str] = None
+
+
+class ToolTenancy(BaseModel):
+    """What proving `tool_tenancy` needs: a reachable tool backend and two of its tenants."""
+
+    url: str  # the MCP endpoint (streamable HTTP), e.g. http://localhost:3000/api/mcp
+    tenant_a: Tenant
+    tenant_b: Tenant
+    # One record of tenant A's. Without it, A is asked to list its own records, which a lookup
+    # tool that requires an identifier cannot do.
+    record_id: Optional[str] = None
+    # The argument that carries the identifier. None reads it off the tool's input schema.
+    id_arg: Optional[str] = None
+
+    def endpoint(self, tenant: Tenant) -> str:
+        return tenant.url or self.url
+
+    @property
+    def urls(self) -> list[str]:
+        """Every endpoint a tenancy proof may send to."""
+        out: list[str] = []
+        for u in (self.url, self.tenant_a.url, self.tenant_b.url):
+            if u and u not in out:
+                out.append(u)
+        return out
+
+
+def parse_tenant(label: str, spec: str, url: Optional[str] = None) -> Tenant:
+    """A tenant from a surface's text: `Name: value` headers, one per line, or a bare token.
+
+    A bare token is sent as `Authorization: Bearer <token>`, the shape almost every HTTP MCP
+    server authenticates with.
+    """
+    headers: dict[str, str] = {}
+    for line in (spec or "").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        name, sep, value = line.partition(":")
+        if sep and name.strip() and " " not in name.strip() and value.startswith(" "):
+            headers[name.strip()] = value.strip()
+        elif line.lower().startswith("bearer "):
+            headers["Authorization"] = line
+        else:
+            headers["Authorization"] = f"Bearer {line}"
+    return Tenant(label=label, headers=headers, url=url or None)
+
+
 class ProveSetup(BaseModel):
     """Everything `prove` needs beyond the repository: two accounts and one seed record."""
 
@@ -251,6 +311,8 @@ class ProveSetup(BaseModel):
     account_b: Account
     seed: Optional[SeedRecord] = None
     row_cap: int = 5  # unfiltered-RLS probe pulls a handful of rows, never a table
+    # Two tenants of a shared tool backend, for `tool_tenancy`. None leaves it reported.
+    tenancy: Optional[ToolTenancy] = None
 
     def model_post_init(self, __context) -> None:  # noqa: D401
         # Label the accounts defensively so downstream messages are unambiguous.

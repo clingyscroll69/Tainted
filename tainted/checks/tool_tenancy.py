@@ -200,6 +200,9 @@ def prove_tool_tenancy(
     """
     finding = Finding(candidate=candidate)
     tool = candidate.metadata.get("tool") or ""
+    # An identifier A's own answer produced is already known to be A's. One the caller supplied
+    # is not, so a refusal of B only counts as a boundary once A is shown to read it.
+    supplied = record_id is not None
 
     if record_id is None:
         record_id, why = _identifier_from_a(invoker, tool, tenant_a, id_arg)
@@ -218,6 +221,8 @@ def prove_tool_tenancy(
         )
 
     if not resp.ok:
+        if supplied and not _owner_reads(invoker, tool, tenant_a, id_arg, record_id):
+            return _reported(finding, _nobody_reads(tool, tenant_a, tenant_b, record_id))
         finding.status = FindingStatus.NOT_REPRODUCED
         finding.proof = ProbeResult(
             succeeded=False,
@@ -267,9 +272,32 @@ def prove_tool_tenancy(
             f"Scope the backing query by the authenticated tenant so an identifier from another "
             f"tenant returns nothing, rather than checking the identifier's format or existence."
         )
+    elif supplied and not _owner_reads(invoker, tool, tenant_a, id_arg, record_id):
+        return _reported(finding, _nobody_reads(tool, tenant_a, tenant_b, record_id))
     else:
         finding.status = FindingStatus.NOT_REPRODUCED
     return finding
+
+
+def _owner_reads(
+    invoker: ToolInvoker, tool: str, tenant_a: TenantIdentity, id_arg: str, record_id: str
+) -> bool:
+    """The control: tenant A asks the same tool for its own record."""
+    try:
+        resp = invoker.invoke(tool=tool, args={id_arg: record_id}, identity=tenant_a)
+    except Exception:  # noqa: BLE001 - an owner who cannot be asked has not shown anything
+        return False
+    return resp.ok and _carries_record(resp, record_id)
+
+
+def _nobody_reads(
+    tool: str, tenant_a: TenantIdentity, tenant_b: TenantIdentity, record_id: str
+) -> str:
+    return (
+        f"Tenant {tenant_b.label} did not receive `{record_id}` from `{tool}`, but tenant "
+        f"{tenant_a.label} could not read it either. Nobody was let in, so the refusal proves "
+        f"nothing: check that `{record_id}` is {tenant_a.label}'s and that `{tool}` takes it."
+    )
 
 
 def _identifier_from_a(
