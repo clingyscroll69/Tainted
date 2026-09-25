@@ -63,9 +63,11 @@ one thing it cannot see:
 
 Six more, each a composition of the same three operations, each honest about what it cannot see:
 
-- `lockout_check(setup)` — the **opposite** failure from a hole: the attack is blocked and the
-  *owner* can no longer reach their own data. Secure and broken is still broken. Nothing checked
-  is reported as undecided, never as a pass.
+- `lockout_check(setup, repo_path=...)` — the **opposite** failure from a hole: the attack is
+  blocked and the *owner* can no longer reach their own data. Secure and broken is still broken.
+  It asks as the owner through the app's own route: the one the seed names, or else the GET
+  route the code shows reading one row of the seed's table by id. When no route fits, or several
+  do, it says so instead of guessing. Nothing checked is reported as undecided, never as a pass.
 - `check_invariants(rules, repo, setup)` — rules you write in plain English ("no user should ever
   see another user's email address"), compiled into one real request each and fired. Three
   verdicts: **violated**, **held**, **not tested** — and the third is the point.

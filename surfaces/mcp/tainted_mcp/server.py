@@ -456,12 +456,18 @@ def tainted_mutate_security(repo_path: str, exclude: str = "") -> dict:
         "Check whether an authorization policy locked out the LEGITIMATE owner — the opposite "
         "failure from a vulnerability, and one no scanner reports. Run it after any change to "
         "authorization, RLS, or a fix somebody else wrote. Localhost only. Needs the OWNER's "
-        "login and a record they own; ask the developer for both, never invent them. A result "
-        "with nothing checked is NOT a pass — read `undecided` and say so."
+        "login and a record they own; ask the developer for both, never invent them. Pass "
+        "`repo_path` and the route that serves the record is read off the code when `route` is "
+        "empty. A result with nothing checked is NOT a pass — read `undecided` and say so."
     )
 )
 def tainted_lockout(
-    url: str, login_a: str = "", seed: str = "", route: str = "", anon_key: str = ""
+    url: str,
+    login_a: str = "",
+    seed: str = "",
+    route: str = "",
+    anon_key: str = "",
+    repo_path: str = "",
 ) -> dict:
     from tainted import lockout_check
 
@@ -479,7 +485,7 @@ def tainted_lockout(
         return {"error": f"{setup.target.url} is not local — refusing.", "ok": False}
     if route.strip() and setup.seed is not None:
         setup.seed.route_path = route.strip()
-    return lockout_check(setup).as_dict()
+    return lockout_check(setup, repo_path=repo_path.strip() or None).as_dict()
 
 
 @server.tool(

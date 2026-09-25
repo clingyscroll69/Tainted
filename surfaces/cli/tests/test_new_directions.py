@@ -81,3 +81,22 @@ def test_receipt_signs_when_given_a_secret(tmp_path):
     assert verify_payload(payload, payload["signature"], b"hunter2") is True
     payload["not_tested"] = {}
     assert verify_payload(payload, payload["signature"], b"hunter2") is False
+
+
+def test_lockout_reads_the_owner_s_route_off_the_repo(monkeypatch):
+    """No --route: the route is found in the code given by --repo and passed to the engine."""
+    from tainted.operations import LockoutResult
+    import tainted_cli.main as cli
+
+    seen = {}
+
+    def fake(setup, **k):
+        seen.update(k)
+        return LockoutResult()
+
+    monkeypatch.setattr(cli, "core_lockout", fake)
+    runner.invoke(app, [
+        "lockout", "--url", "http://localhost:3000", "--login-a", "a@x.com:pw",
+        "--seed", "invoices:42", "--repo", "tests/fixtures/vulnerable_routes",
+    ])
+    assert seen["repo_path"] == "tests/fixtures/vulnerable_routes"

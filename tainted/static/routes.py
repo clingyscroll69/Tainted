@@ -592,3 +592,60 @@ def _candidate_files(root: Path, exclude: Sequence[str] = ()) -> Iterable[Path]:
             continue
         if path.suffix == ".py" or path.suffix in _JS_EXTS:
             yield path
+
+
+# --------------------------------------------------------------------------- #
+# Which route serves one record
+# --------------------------------------------------------------------------- #
+def route_for_table(
+    repo_path: str, table: str, exclude: Sequence[str] = ()
+) -> tuple[Optional[RouteHandler], str]:
+    """The declared route that reads one row of `table` by a single path identifier.
+
+    This is how a seed record, which names a table and an id, finds the door its owner uses:
+    a GET route with exactly one path parameter, where that parameter reaches a read of the
+    table. The table is matched by its singular, case- and separator-folded form, because a
+    handler names it as it pleases (`orders`, Prisma's `order`, SQLAlchemy's `Order`).
+
+    Returns `(route, why)`. `route` is None when no route qualifies, or when several do and
+    nothing tells them apart; guessing a door would test one the owner may never use.
+    """
+    want = _singular(table)
+    fits = [
+        r
+        for r in discover_routes(repo_path, exclude=exclude)
+        if r.method in ("GET", "*")
+        and len(r.params) == 1
+        and r.param_reaching_read is not None
+        and any(_singular(t) == want for t in r.tables)
+    ]
+    if not fits:
+        return None, f"no GET route with one path identifier reads `{table}`"
+    # A handler whose identifier appears in the read itself, not merely in its body, is the
+    # stronger reading; among equals, a plain GET beats a catch-all.
+    fits.sort(key=lambda r: (not _param_in_read(r), r.method != "GET"))
+    best = fits[0]
+    rivals = [r for r in fits[1:] if (_param_in_read(r), r.method) == (_param_in_read(best), best.method)]
+    if rivals:
+        named = ", ".join(str(r) for r in [best, *rivals])
+        return None, f"several routes read one `{table}` row by id ({named}); name one"
+    return best, f"inferred from {best}"
+
+
+def _param_in_read(route: RouteHandler) -> bool:
+    return any(
+        re.search(rf"\b{re.escape(p)}\b", read.expression)
+        for p in route.params
+        for read in route.db_reads
+    )
+
+
+def _singular(name: str) -> str:
+    n = re.sub(r"[^a-z0-9]", "", name.lower())
+    if n.endswith("ies") and len(n) > 3:
+        return n[:-3] + "y"
+    if n.endswith(("sses", "ches", "shes", "xes")):
+        return n[:-2]
+    if n.endswith("s") and not n.endswith("ss"):
+        return n[:-1]
+    return n

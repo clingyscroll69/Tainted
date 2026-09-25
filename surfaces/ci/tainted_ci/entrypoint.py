@@ -243,7 +243,7 @@ def run() -> int:
     if os.environ.get("TAINTED_LOCKOUT", "").lower() in ("1", "true", "yes") and setup is not None:
         from tainted import lockout_check
 
-        lockout_result = lockout_check(setup, ownership_verified=verified)
+        lockout_result = lockout_check(setup, ownership_verified=verified, repo_path=repo)
 
     markdown = render_markdown(report, prove_note)
     if invariant_report is not None:

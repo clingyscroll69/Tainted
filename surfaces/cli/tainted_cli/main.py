@@ -377,8 +377,13 @@ def lockout(
     url: str = typer.Option(..., help="Base URL of the running app"),
     login_a: str = typer.Option(..., "--login-a", help="email:password for the owner"),
     seed: str = typer.Option(..., help="table:id of a record the owner owns"),
-    route: Optional[str] = typer.Option(None, help="The route that serves it, e.g. /api/invoices/[id]"),
+    route: Optional[str] = typer.Option(
+        None, help="The route that serves it, e.g. /api/invoices/[id]. Read off --repo when omitted."
+    ),
     anon_key: Optional[str] = typer.Option(None, help="Supabase anon key, if the app uses one"),
+    repo: Path = typer.Option(
+        Path("."), exists=True, file_okay=False, help="The app's code, to find the record's route in"
+    ),
 ):
     """Check whether your security locked out your own users.
 
@@ -389,7 +394,7 @@ def lockout(
     setup = _build_setup(url, login_a, login_a, seed, anon_key)
     if route and setup.seed:
         setup.seed.route_path = route
-    result = core_lockout(setup)
+    result = core_lockout(setup, repo_path=str(repo))
 
     if not result.checked:
         console.print("[yellow]Nothing was tested.[/yellow] This is not a pass.")

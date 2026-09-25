@@ -86,7 +86,42 @@ def test_an_app_without_postgrest_is_undecided_not_locked_out():
     client = _client(handler)
     result = lockout_check(s, prober=RouteProber(s, client=client), replay=SupabaseReplay(s.target, client))
     assert result.locked_out == [] and result.ok is False
-    assert "anon key" in result.undecided[0]["reason"]
+    assert any("anon key" in u["reason"] for u in result.undecided)
+
+
+def test_the_owner_s_route_is_read_off_the_code_when_the_seed_names_none():
+    """A Next.js app with no PostgREST: the route the code declares is the door that answers."""
+    asked = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        asked.append(request.url.path)
+        if request.url.path == "/api/invoices/42":
+            return httpx.Response(200, json={"id": "42"})
+        return httpx.Response(404)
+
+    s = _setup()
+    s.target = Target(url="http://localhost:3000")
+    client = _client(handler)
+    result = lockout_check(
+        s, prober=RouteProber(s, client=client), replay=SupabaseReplay(s.target, client),
+        repo_path="tests/fixtures/vulnerable_routes",
+    )
+    assert asked == ["/api/invoices/42"]
+    assert result.ok is True
+    assert "inferred from GET /api/invoices/[id]" in result.checked[0].detail
+
+
+def test_a_table_no_route_reads_is_said_not_guessed():
+    s = _setup()
+    s.seed = SeedRecord(table="users", id="7")
+    s.target = Target(url="http://localhost:3000")
+    client = _client(lambda r: httpx.Response(404))
+    result = lockout_check(
+        s, prober=RouteProber(s, client=client), replay=SupabaseReplay(s.target, client),
+        repo_path="tests/fixtures/vulnerable_routes",
+    )
+    assert result.checked == []
+    assert any("reads `users`" in u["reason"] for u in result.undecided)
 
 
 def test_no_seed_is_undecided_and_never_ok():

@@ -67,6 +67,7 @@ def preflight(
     ownership_verified: bool,
     replay: Optional[SupabaseReplay] = None,
     prober: Optional[RouteProber] = None,
+    repo_path: Optional[str] = None,
 ) -> PreflightResult:
     """Check the run is sound before any exploit fires, and name the check that isn't.
 
@@ -122,7 +123,8 @@ def preflight(
     # broken, and any BOLA result that follows would be meaningless.
     seed = setup.seed
     if seed is not None and (setup.account_a.email or setup.account_a.access_token):
-        ok, detail = _positive_control(setup, prober, replay)
+        route, _source = _owner_route(setup, repo_path)
+        ok, detail = _positive_control(setup, prober, replay, route)
         result.checks.append(PreflightCheck("positive_control", ok, detail))
     else:
         result.checks.append(
@@ -136,14 +138,18 @@ def preflight(
 
 
 def _positive_control(
-    setup: ProveSetup, prober: RouteProber, replay: Optional[SupabaseReplay]
+    setup: ProveSetup,
+    prober: RouteProber,
+    replay: Optional[SupabaseReplay],
+    route: Optional[str] = None,
 ) -> tuple[bool, str]:
     """As account A, read A's own seed record. It must come back, or nothing downstream is sound."""
     seed = setup.seed
     assert seed is not None  # caller only invokes this when a seed record exists
-    if seed.route_path:
+    route = route or seed.route_path
+    if route:
         try:
-            url = prober.build_url(seed.route_path, seed.id)
+            url = prober.build_url(route, seed.id)
             resp = prober.request("GET", url, setup.account_a)
         except httpx.HTTPError as exc:
             return False, f"account A's own request failed: {exc}"
@@ -275,6 +281,26 @@ def reprove(
         f"attack no longer lands; {legit_detail}",
         attack_blocked=True, legitimate_access_ok=legit_ok,
     )
+
+
+def _owner_route(setup: ProveSetup, repo_path: Optional[str]) -> tuple[Optional[str], str]:
+    """The app route the seed record is served through, and where that answer came from.
+
+    A route the caller named wins. Otherwise it is read off the code: the one GET route whose
+    single path identifier reaches a read of the seed's table. No route found is said, not
+    papered over, because the owner's own door is the stronger half of the question.
+    """
+    seed = setup.seed
+    if seed is None:
+        return None, "no seed record"
+    if seed.route_path:
+        return seed.route_path, "named with the seed"
+    if repo_path is None:
+        return None, "no route named with the seed, and no repository to read one from"
+    from tainted.static.routes import route_for_table
+
+    route, why = route_for_table(repo_path, seed.table)
+    return (route.path if route else None), why
 
 
 def _speaks_postgrest(setup: ProveSetup) -> bool:
@@ -571,6 +597,7 @@ def lockout_check(
     ownership_verified: bool = False,
     prober: Optional[RouteProber] = None,
     replay: Optional[SupabaseReplay] = None,
+    repo_path: Optional[str] = None,
 ) -> LockoutResult:
     """Ask, on its own, whether the authorization policy locked out the legitimate owner.
 
@@ -620,12 +647,21 @@ def lockout_check(
     prober = prober or RouteProber(setup)
     replay = replay or SupabaseReplay(setup.target, prober._client)
 
-    # The app's own route, when the seed names one — the door the owner actually uses.
-    if seed.route_path:
-        ok, detail = prober.legitimate_access_survives()
+    # The app's own route — the door the owner actually uses. Named with the seed, or read off
+    # the code when a repository is given.
+    route, source = _owner_route(setup, repo_path)
+    if route:
+        ok, detail = prober.legitimate_access_survives(route)
         result.checked.append(
-            LockoutFinding(resource=seed.route_path, via="route", owner_locked_out=not ok, detail=detail)
+            LockoutFinding(
+                resource=route,
+                via="route",
+                owner_locked_out=not ok,
+                detail=f"{detail} (Route {source}.)",
+            )
         )
+    else:
+        result.undecided.append({"resource": "app route", "reason": f"Not checked: {source}."})
 
     # PostgREST, which on the Supabase stack is a door the browser opens directly.
     via_rest, detail = _legit_via_postgrest(setup, replay)

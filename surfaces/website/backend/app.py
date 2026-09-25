@@ -536,7 +536,14 @@ def api_lockout(req: LockoutRequest, request: Request):
     if req.route and setup.seed is not None:
         setup.seed.route_path = req.route
     _gate_ownership(req, request, setup)
-    return JSONResponse(lockout_check(setup, ownership_verified=True).as_dict())
+    # With a repository chosen, the owner's route is read off its code when none was named.
+    chosen = getattr(req, "repo", None) or getattr(req, "repo_path", None)
+    if chosen and not demo_mode.is_demo(req.repo_path, req.repo):
+        with _checkout(req, request) as repo_path:
+            result = lockout_check(setup, ownership_verified=True, repo_path=repo_path)
+    else:
+        result = lockout_check(setup, ownership_verified=True)
+    return JSONResponse(result.as_dict())
 
 
 # --------------------------------------------------------------------------- #
