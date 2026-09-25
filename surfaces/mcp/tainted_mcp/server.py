@@ -516,18 +516,30 @@ def tainted_invariants(
 
 @server.tool(
     description=(
-        "Read-only. A receipt for one analysis: what fired, what worked, and what was never "
+        "Read-only. A receipt for one run: what fired, what worked, and what was never "
         "tried — with the untested surface INSIDE the signed payload, so it cannot be deleted "
-        "from a document that still verifies. Pass `secret` to sign it; without one the "
-        "receipt is unsigned and says so. Hand this to someone doing security diligence."
+        "from a document that still verifies. Pass `job_id` from a finished prove job to cover "
+        "the attacks that ran; without one it covers a static analysis, which fires nothing. "
+        "Pass `secret` to sign it; without one the receipt is unsigned and says so. Hand this "
+        "to someone doing security diligence."
     )
 )
-def tainted_receipt(repo_path: str, exclude: str = "", secret: str = "") -> dict:
+def tainted_receipt(
+    repo_path: str, exclude: str = "", secret: str = "", job_id: str = ""
+) -> dict:
     from tainted.receipt import build_receipt, sign as _sign
 
-    patterns = [p.strip() for p in exclude.split(",") if p.strip()]
-    result = core_analyze(repo_path, llm=_llm_or_none(), exclude=patterns)
-    rec = build_receipt(build_report(result))
+    if job_id:
+        from tainted.report import Report
+
+        job = _JOBS.get(job_id)
+        if job is None or not job.report:
+            return {"error": f"No completed prove job `{job_id}`. Run tainted_prove_start first."}
+        report = Report.model_validate(job.report)
+    else:
+        patterns = [p.strip() for p in exclude.split(",") if p.strip()]
+        report = build_report(core_analyze(repo_path, llm=_llm_or_none(), exclude=patterns))
+    rec = build_receipt(report)
     signature = _sign(rec, secret.encode("utf-8")) if secret else None
     out = rec.as_dict(signature)
     if signature is None:

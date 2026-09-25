@@ -29,6 +29,28 @@ def test_receipt_carries_its_untested_surface_and_admits_it_is_unsigned():
     assert "not signed" in body["unsigned"]
 
 
+def test_a_receipt_of_the_page_s_prove_run_lists_what_fired():
+    """An analysis fires nothing; the report of the prove run on screen is what fired."""
+    from tainted.models import (
+        AnalysisResult, Candidate, Check, Exploit, Finding, FindingStatus, ProbeResult,
+        Severity, SourceLocation,
+    )
+    from tainted.report import build_report
+
+    cand = Candidate(check=Check.BOLA, title="invoice leak", severity=Severity.HIGH,
+                     location=SourceLocation(file="app.py", line=1))
+    finding = Finding(candidate=cand, status=FindingStatus.PROVEN, proof=ProbeResult(
+        succeeded=True, kind="route_bola",
+        exploit=Exploit(description="x", url="http://localhost:3000/api/invoices/42", executed=True),
+    ))
+    report = build_report(AnalysisResult(repo_path=".", candidates=[cand]), [finding])
+    body = client.post(
+        "/api/receipt", json={**_demo(), "report": report.model_dump(mode="json")}
+    ).json()
+    assert [r["status"] for r in body["fired"]] == ["proven"]
+    assert client.post("/api/receipt", json={**_demo(), "report": {"findings": 3}}).status_code == 422
+
+
 def test_the_receipt_payload_is_verifiable_by_whoever_signs_it():
     """The server does not sign, but what it returns must be signable and tamper-evident."""
     body = client.post("/api/receipt", json=_demo()).json()

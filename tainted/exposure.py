@@ -38,6 +38,11 @@ _PROOF_ESTABLISHING = frozenset(
     {FindingStatus.PROVEN, FindingStatus.FIXED, FindingStatus.BROKE_IT_SAFELY}
 )
 
+# The probes that proved a hole through PostgREST itself. Counting is a PostgREST request, so it
+# measures only those: a hole proven through an app route or by SQL injection is a different
+# door, and a locked PostgREST would count it as zero rows when the hole is real.
+_POSTGREST_PROOFS = frozenset({"targeted_bola", "unfiltered_rls"})
+
 
 @dataclass(frozen=True)
 class Exposure:
@@ -116,6 +121,7 @@ def measure_exposure(
     setup: ProveSetup,
     replay: Optional[SupabaseReplay] = None,
     consented: bool = False,
+    ownership_verified: bool = False,
 ) -> ExposureReport:
     """Size every proven hole in `findings` against the running target.
 
@@ -126,18 +132,21 @@ def measure_exposure(
     measured or quietly dropped.
     """
     report = ExposureReport()
+    refusal = None
     if not consented:
+        refusal = (
+            "Exposure measurement is opt-in. Nothing was counted, so the size of this hole is "
+            "unknown rather than small."
+        )
+    elif not setup.target.is_local and not ownership_verified:
+        refusal = (
+            "Non-local target without verified ownership, so nothing was counted. The size of "
+            "this hole is unknown rather than small."
+        )
+    if refusal is not None:
         for f in findings:
             if f.status in _PROOF_ESTABLISHING:
-                report.skipped.append(
-                    {
-                        "finding_id": f.candidate.id,
-                        "reason": (
-                            "Exposure measurement is opt-in. Nothing was counted, so the size of "
-                            "this hole is unknown rather than small."
-                        ),
-                    }
-                )
+                report.skipped.append({"finding_id": f.candidate.id, "reason": refusal})
         return report
 
     replay = replay or SupabaseReplay(setup.target)
@@ -149,6 +158,18 @@ def measure_exposure(
                     "reason": (
                         f"Status is {finding.status.value}; only a hole that actually fired is "
                         f"sized, because a number on a suspicion reads as a measured fact."
+                    ),
+                }
+            )
+            continue
+        kind = finding.proof.kind if finding.proof else ""
+        if kind not in _POSTGREST_PROOFS:
+            report.skipped.append(
+                {
+                    "finding_id": finding.candidate.id,
+                    "reason": (
+                        f"Proven through `{kind or 'an unrecorded probe'}`, not PostgREST. A "
+                        f"PostgREST count would measure a different door, so none was taken."
                     ),
                 }
             )

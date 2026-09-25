@@ -25,6 +25,7 @@ attributability is the whole difference between evidence and a guess.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Protocol
 
@@ -109,11 +110,30 @@ def lookup_tools(scope: AgentScope) -> list[ToolSpec]:
 
 
 def _is_lookup(tool: ToolSpec) -> bool:
-    name = (tool.name or "").lower()
-    desc = (tool.description or "").lower()
-    if not any(h in name or h in desc for h in _LOOKUP_HINT):
-        return False
-    return any(h in name or h in desc for h in _ID_ARG_HINT)
+    # Whole words, never substrings: as substrings "load" fires inside `upload`, "get" inside
+    # `budget` and "id" inside "provided", which made an upload tool a cross-tenant candidate.
+    words = _words(tool.name) | _words(tool.description)
+    return bool(words & _LOOKUP_WORDS) and bool(words & _ID_WORDS)
+
+
+def _inflect(stems: tuple[str, ...]) -> frozenset[str]:
+    """Each hint with its plural or third-person forms: `fetch` -> `fetches`, `query` -> `queries`."""
+    forms = set(stems)
+    for s in stems:
+        forms.update({s + "s", s + "es"})
+        if s.endswith("y"):
+            forms.add(s[:-1] + "ies")
+    return frozenset(forms)
+
+
+_LOOKUP_WORDS = _inflect(_LOOKUP_HINT)
+_ID_WORDS = _inflect(tuple(h.strip("_") for h in _ID_ARG_HINT)) | {"identifier", "identifiers"}
+
+
+def _words(text: Optional[str]) -> set[str]:
+    """Lower-case words of a name or sentence, splitting snake_case, kebab-case and camelCase."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text or "")
+    return set(re.findall(r"[a-z0-9]+", spaced.lower()))
 
 
 def analyze_tool_tenancy(scopes: list[AgentScope]) -> list[Candidate]:

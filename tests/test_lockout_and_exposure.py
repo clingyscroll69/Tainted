@@ -76,6 +76,19 @@ def test_route_and_postgrest_are_both_checked_when_the_seed_names_a_route():
     assert {c.via for c in result.checked} == {"route", "postgrest"}
 
 
+def test_an_app_without_postgrest_is_undecided_not_locked_out():
+    """No anon key means no PostgREST: its 404 is a missing door, not a locked-out owner."""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="Not Found")
+
+    s = _setup()
+    s.target = Target(url="http://localhost:3000")
+    client = _client(handler)
+    result = lockout_check(s, prober=RouteProber(s, client=client), replay=SupabaseReplay(s.target, client))
+    assert result.locked_out == [] and result.ok is False
+    assert "anon key" in result.undecided[0]["reason"]
+
+
 def test_no_seed_is_undecided_and_never_ok():
     """The property that matters: nothing tested must not read as nothing wrong."""
     result = lockout_check(_setup(seed=False))
@@ -181,3 +194,20 @@ def test_a_suspicion_is_never_sized():
     report = measure_exposure([f], _setup(), consented=True)
     assert report.measured == []
     assert "only a hole that actually fired" in report.skipped[0]["reason"]
+
+
+def test_a_hole_proven_through_an_app_route_is_not_counted_via_postgrest():
+    """A locked PostgREST would count a real route hole as zero rows."""
+    f = _proven_finding()
+    f.proof.kind = "route_bola"
+    report = measure_exposure([f], _setup(), consented=True)
+    assert report.measured == [] and report.total_rows is None
+    assert "different door" in report.skipped[0]["reason"]
+
+
+def test_a_remote_target_without_ownership_is_not_counted():
+    s = _setup()
+    s.target = Target(url="https://someone-elses-app.com", anon_key="anon")
+    report = measure_exposure([_proven_finding()], s, consented=True)
+    assert report.measured == []
+    assert "ownership" in report.skipped[0]["reason"]

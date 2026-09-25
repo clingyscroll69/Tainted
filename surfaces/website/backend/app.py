@@ -25,7 +25,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from tainted import __version__ as tainted_version
 from tainted import analyze as core_analyze
@@ -35,7 +35,7 @@ from tainted.fix import InterviewAnswer, tool_plane_interview
 from tainted.llm.gemini import get_default_client
 from tainted.models import AnalysisResult, Candidate, Finding
 from tainted.ownership import WELL_KNOWN_PATH, verify
-from tainted.report import select_candidate
+from tainted.report import Report, select_candidate
 from backend import demo as demo_mode
 from backend import github
 from backend import keys
@@ -224,6 +224,16 @@ class InvariantsRequest(ProveRequest):
     """
 
     rules: list[str] = []
+
+
+class ReceiptRequest(AnalyzeRequest):
+    """An analysis, or the report of a prove run this page already holds.
+
+    Without `report` the receipt covers a static analysis, which fires nothing. The server signs
+    neither, so a report the caller supplies attests nothing the caller could not write itself.
+    """
+
+    report: Optional[dict] = None
 
 
 class LockoutRequest(ProveRequest):
@@ -460,8 +470,8 @@ def api_ledger(req: AnalyzeRequest, request: Request):
 
 
 @app.post("/api/receipt")
-def api_receipt(req: AnalyzeRequest, request: Request):
-    """A receipt for this analysis: what fired, what worked, and what was never tried.
+def api_receipt(req: ReceiptRequest, request: Request):
+    """A receipt for this run: what fired, what worked, and what was never tried.
 
     Unsigned here by design. Signing is an attestation by whoever holds the key, and this server
     holding one would mean it was attesting on the user's behalf to a run it performed for them —
@@ -470,7 +480,14 @@ def api_receipt(req: AnalyzeRequest, request: Request):
     """
     from tainted.receipt import build_receipt
 
-    if demo_mode.is_demo(req.repo_path, req.repo):
+    if req.report is not None and not req.report.get("demo"):
+        # The prove run the page just showed. A demonstration's findings are invented, so its
+        # report never becomes a receipt of attacks that fired.
+        try:
+            report = Report.model_validate(req.report)
+        except ValidationError as exc:
+            raise HTTPException(422, f"That is not a Tainted report: {exc.error_count()} error(s).")
+    elif demo_mode.is_demo(req.repo_path, req.repo):
         report = demo_mode.demo_analyze_report()
     else:
         with _checkout(req, request) as repo_path:

@@ -75,11 +75,14 @@ Six more, each a composition of the same three operations, each honest about wha
 - `emit_regression_test(finding, repo)` — a proven exploit written out as a test in *your* test
   framework (pytest / vitest / jest), asserting the attack **fails**. It imports nothing from
   Tainted, so it keeps working after Tainted is gone. No framework detected means it refuses
-  rather than guesses.
-- `measure_exposure(findings, setup, consented=True)` — how many rows the attacking account can
-  actually reach through a proven hole, and which columns. Counted via PostgREST
+  rather than guesses, and so does a proof with no leaked record id to watch for (an unfiltered
+  RLS read), since that test would pass whether the hole is open or not.
+- `measure_exposure(findings, setup, consented=True, ownership_verified=...)` — how many rows the
+  attacking account can actually reach through a hole proven via PostgREST, and which columns.
+  A hole proven through an app route is a different door and is not counted. Counted via PostgREST
   `Prefer: count=exact`, so the total arrives in a header while the body stays at one row:
-  **counts and column names, never values.** Opt-in, and uncounted is never rendered as zero.
+  **counts and column names, never values.** Opt-in, ownership-gated like `prove`, and uncounted
+  is never rendered as zero.
 - **`Check.TOOL_TENANCY`** — BOLA one layer up. Two tenants, one shared tool backend, and a
   `get_x(id)` tool that authorizes on the identifier instead of the caller. Not gated on
   co-location: that makes an agent *turnable*, which is a different question from whether the
@@ -112,7 +115,7 @@ tools plus enriched `tainted_analyze`; `TAINTED_SARIF` and `TAINTED_DIFF_ONLY` i
 | **Classic injection** | Regex pass, confirmed by Semgrep taint | SQL injection is proven live on read routes; on a write route the payload is built and held. Command and template injection are demonstrated with a real payload but never executed |
 | **Agent injection** | Reads the tool graph across MCP, n8n, Flowise, LangChain (Python/JS), CrewAI | A configured agent is proven in a sandbox with logging-stub tools, and only when the sink call carries a string the attack's payload chose; a payload that names none is reported, not run. A coded agent is reported from the code only, never run |
 | **Test integrity** | — | The mutant that survives (via Stryker / mutmut) is itself the proof |
-| **Tool tenancy** | Finds tools that fetch a record by identifier across the same tool graph | Tenant B's agent calls the shared backend for tenant A's record; only a returned record that is attributably A's counts |
+| **Tool tenancy** | Finds tools that fetch a record by identifier across the same tool graph | Reported from the tool graph in every run. `prove_tool_tenancy` proves it from Python, given a tool invoker and two tenant credentials: tenant B calls the shared backend for tenant A's record, and only a returned record that is attributably A's counts. No surface collects tenant credentials yet |
 
 Every report says which checks were proven and which were only analyzed. Without that,
 a report with no proof column reads as a clean bill of health when it might just mean

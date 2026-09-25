@@ -7641,7 +7641,12 @@ html.is-diving,html.is-diving body{overflow:hidden}
       '<li><span class="dot ' + (c.owner_locked_out ? 'shut' : 'ok') + '" aria-hidden="true"></span>' +
       '<span>' + ESC(c.resource) + ' <span class="s">via ' + ESC(c.via) + '</span></span>' +
       '<span class="s">' + (c.owner_locked_out ? 'LOCKED OUT' : 'REACHABLE') + '</span>' +
-      '<p class="why">' + ESC(c.detail) + '</p></li>').join('');
+      '<p class="why">' + ESC(c.detail) + '</p></li>').join('') +
+      /* A door nobody could ask through stays on screen beside the ones that answered. */
+      (res.undecided || []).map(u =>
+        '<li><span class="dot" aria-hidden="true"></span>' +
+        '<span>' + ESC(u.resource || '') + '</span><span class="s">NOT CHECKED</span>' +
+        '<p class="why">' + ESC(u.reason) + '</p></li>').join('');
   }
 
   document.getElementById('checklock').addEventListener('click', async ev => {
@@ -7661,7 +7666,11 @@ html.is-diving,html.is-diving body{overflow:hidden}
     const box = document.getElementById('receiptbox');
     btn.disabled = true;
     try {
-      const rec = await call('/api/receipt', repoSelection());
+      /* The prove run on screen, when there is one, so the receipt lists the attacks that
+         fired; without it the server analyses afresh, and a static analysis fires nothing.
+         A demonstration's report is never sent: its findings are invented. */
+      const proven = lastReport && !lastReport.demo ? {report: lastReport} : {};
+      const rec = await call('/api/receipt', Object.assign(repoSelection(), proven));
       const fired = (rec.fired || []).length;
       const worked = (rec.fired || []).filter(f => f.succeeded).length;
       const silent = ((rec.not_tested || {}).not_proved || []).length;

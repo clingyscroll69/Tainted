@@ -76,6 +76,31 @@ def test_receipt_signs_when_given_a_secret():
     assert verify_payload(out, out["signature"], b"k") is True
 
 
+def test_receipt_of_a_prove_job_lists_what_fired():
+    """Without a job it covers a static run, which fires nothing; with one, the attacks."""
+    from tainted.models import (
+        AnalysisResult, Candidate, Check, Exploit, Finding, FindingStatus, ProbeResult,
+        Severity, SourceLocation,
+    )
+    from tainted.report import build_report
+    from tainted_mcp.server import _JOBS, _Job
+
+    cand = Candidate(check=Check.BOLA, title="invoice leak", severity=Severity.HIGH,
+                     location=SourceLocation(file="app.py", line=1))
+    finding = Finding(candidate=cand, status=FindingStatus.PROVEN, proof=ProbeResult(
+        succeeded=True, kind="route_bola",
+        exploit=Exploit(description="x", url="http://localhost:3000/api/invoices/42", executed=True),
+    ))
+    report = build_report(AnalysisResult(repo_path=".", candidates=[cand]), [finding])
+    _JOBS["receipt-job"] = _Job(status="done", report=report.model_dump(mode="json"))
+    try:
+        out = tainted_receipt(repo_path=".", job_id="receipt-job")
+    finally:
+        _JOBS.pop("receipt-job", None)
+    assert [r["status"] for r in out["fired"]] == ["proven"]
+    assert tainted_receipt(repo_path=".", job_id="no-such-job")["error"]
+
+
 # ----------------------------- regression test ------------------------------ #
 def test_regression_test_needs_a_completed_prove_job():
     out = tainted_regression_test(repo_path=".", job_id="no-such-job")

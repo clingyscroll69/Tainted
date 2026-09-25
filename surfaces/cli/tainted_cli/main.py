@@ -95,6 +95,12 @@ def prove(
     max_candidates: Optional[int] = typer.Option(
         None, help="Stop after attempting this many candidates."
     ),
+    receipt: Optional[Path] = typer.Option(
+        None, help="Write a receipt of this run here: what fired, what worked, what was never tried."
+    ),
+    receipt_secret: Optional[str] = typer.Option(
+        None, envvar="TAINTED_RECEIPT_SECRET", help="Signing key for --receipt. Without one it is unsigned."
+    ),
 ):
     """Run real attacks against the running app, inside a Docker sandbox. Localhost only."""
     from tainted.budget import parse_budget
@@ -138,6 +144,8 @@ def prove(
     render_report(report)
     if outcome.budget and outcome.budget.get("stopped_early"):
         console.print(f"[yellow]{_e(outcome.budget['note'])}[/yellow]")
+    if receipt is not None:
+        _write_receipt(report, receipt, receipt_secret)
     findings = report.findings
     if any(
         f.status == FindingStatus.PROVEN and f.severity.rank >= Severity.HIGH.rank
@@ -392,6 +400,9 @@ def lockout(
     for c in result.checked:
         tag = "[red]locked out[/red]" if c.owner_locked_out else "[green]reachable[/green]"
         console.print(f"  {tag} {_e(c.resource)} [dim]via {_e(c.via)}[/dim] — {_e(c.detail)}")
+    # What could not be asked is shown beside what was: a pass on one door says nothing of another.
+    for row in result.undecided:
+        console.print(f"  [yellow]not tested[/yellow] {_e(row['resource'])} — {_e(row['reason'])}")
     console.print(f"\n[bold]{_e(result.as_dict()['detail'])}[/bold]")
     if result.locked_out:
         raise typer.Exit(code=1)
@@ -431,10 +442,12 @@ def receipt(
         None, envvar="TAINTED_RECEIPT_SECRET", help="Signing key. Without one the receipt is unsigned."
     ),
 ):
-    """Emit a signed receipt: what was fired, what worked, and what was never tried.
+    """Emit a signed receipt of a static analysis: what was never tried, and nothing fired.
 
-    The signature covers the untested surface as well as the findings, so the admissions cannot be
-    deleted from a document that still verifies. Prints JSON to stdout.
+    This runs no attack, so its `fired` list is empty by construction. For a receipt of attacks
+    that ran, use `tainted prove --receipt PATH`. The signature covers the untested surface as
+    well as the findings, so the admissions cannot be deleted from a document that still
+    verifies. Prints JSON to stdout.
     """
     import json as _json
 
@@ -452,6 +465,28 @@ def version():
     import tainted
 
     typer.echo(f"tainted {tainted.__version__}")
+
+
+def _write_receipt(report, path: Path, secret: Optional[str]) -> None:
+    """Write a receipt of a proven run; an unsigned one says so rather than pass as attested."""
+    import json as _json
+
+    from tainted.receipt import build_receipt, sign as _sign
+
+    rec = build_receipt(report)
+    signature = _sign(rec, secret.encode("utf-8")) if secret else None
+    try:
+        path.write_text(_json.dumps(rec.as_dict(signature), indent=2), encoding="utf-8")
+    except OSError as exc:
+        console.print(f"[yellow]Could not write the receipt to {_e(path)}: {_e(exc)}[/yellow]")
+        return
+    if signature is None:
+        console.print(
+            f"[yellow]Wrote an UNSIGNED receipt to {_e(path)}. It is a report, not an "
+            f"attestation; set TAINTED_RECEIPT_SECRET to sign it.[/yellow]"
+        )
+    else:
+        console.print(f"Wrote a signed receipt to {_e(path)}.")
 
 
 # --------------------------------------------------------------------------- #

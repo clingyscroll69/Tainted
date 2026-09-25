@@ -78,6 +78,22 @@ def test_only_lookup_tools_become_candidates():
     assert names == ["get_invoice"]
 
 
+def test_hints_match_whole_words_not_fragments():
+    """`upload` is not `load`, and "provided" does not name an id."""
+    scope = AgentScope(
+        name="files",
+        kind="mcp",
+        source_file="mcp.json",
+        tools=[
+            ToolSpec(name="upload_file", description="Upload a file to the provided bucket"),
+            ToolSpec(name="set_budget", description="Set the video budget inside the plan"),
+            ToolSpec(name="getInvoice", description="Returns one invoice by invoiceId"),
+            ToolSpec(name="lookup", description="Retrieves customer records by identifier"),
+        ],
+    )
+    assert [t.name for t in lookup_tools(scope)] == ["getInvoice", "lookup"]
+
+
 def test_a_scope_with_no_sink_still_yields_a_candidate():
     """Co-location makes an agent turnable; it has nothing to do with the backend's authorization."""
     read_only = AgentScope(
@@ -229,3 +245,40 @@ def test_a_demonstrated_but_unfired_exploit_emits_nothing(tmp_path):
     (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
     with pytest.raises(NotReproducible):
         emit_regression_test(_proven_finding(executed=False), str(tmp_path))
+
+
+def _probe_finding(kind, url, status=FindingStatus.PROVEN):
+    f = _proven_finding()
+    f.candidate.metadata = {}
+    f.status = status
+    f.proof.kind = kind
+    f.proof.exploit.url = url
+    return f
+
+
+def test_a_postgrest_proof_marks_the_record_it_filtered_on(tmp_path):
+    """Not the URL's tail: `invoices?id=eq.42` appears in no response, so it guards nothing."""
+    (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    f = _probe_finding("targeted_bola", "http://x/rest/v1/invoices?id=eq.42&select=*")
+    assert emit_regression_test(f, str(tmp_path)).marker == "42"
+
+
+def test_a_proof_with_no_identifying_value_emits_nothing(tmp_path):
+    (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    f = _probe_finding("unfiltered_rls", "http://x/rest/v1/invoices?select=*&limit=5")
+    with pytest.raises(NotReproducible, match="pass either way"):
+        emit_regression_test(f, str(tmp_path))
+
+
+def test_an_attack_that_held_is_not_turned_into_a_regression_test(tmp_path):
+    (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    f = _probe_finding("route_bola", "http://x/api/invoices/42", FindingStatus.NOT_REPRODUCED)
+    with pytest.raises(NotReproducible, match="not proven"):
+        emit_regression_test(f, str(tmp_path))
+
+
+def test_jest_output_never_hands_expect_a_message(tmp_path):
+    """Jest's `expect` takes one argument; a second made every emitted test fail."""
+    (tmp_path / "package.json").write_text(json.dumps({"devDependencies": {"jest": "^29"}}), encoding="utf-8")
+    src = emit_regression_test(_proven_finding(), str(tmp_path)).source
+    assert "expect(leaked).toBe(false)" in src and "expect(\n" not in src

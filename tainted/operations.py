@@ -154,6 +154,11 @@ def _positive_control(
             f"broken or the seed is wrong; a BOLA result here would be meaningless."
         )
     # PostgREST path.
+    if not _speaks_postgrest(setup):
+        return True, (
+            "no seed route and no anon key, so there is no door to ask through — positive "
+            "control skipped"
+        )
     rep = replay or SupabaseReplay(setup.target, prober._client)
     try:
         rep.authenticate(setup.account_a)
@@ -250,6 +255,7 @@ def reprove(
 
     # The attack no longer works. Is legitimate access intact?
     is_route = finding.check is Check.BOLA and finding.candidate.metadata.get("route_path")
+    legit_ok: Optional[bool]
     if is_route:
         # The route probe already asked as A through the same URL once B was refused: it
         # says NOT_REPRODUCED only when A still reads the record, REPORTED when A cannot.
@@ -258,7 +264,12 @@ def reprove(
     else:
         legit_ok, legit_detail = _legit_via_postgrest(setup, replay)
 
-    status = FindingStatus.FIXED if legit_ok else FindingStatus.BROKE_IT_SAFELY
+    if legit_ok is None:
+        # The attack ran and held, and nobody asked whether the owner still gets in. That is
+        # NOT_REPRODUCED, not FIXED: FIXED claims both halves.
+        status = FindingStatus.NOT_REPRODUCED
+    else:
+        status = FindingStatus.FIXED if legit_ok else FindingStatus.BROKE_IT_SAFELY
     return ReproveResult(
         finding.candidate.id, status,
         f"attack no longer lands; {legit_detail}",
@@ -266,9 +277,23 @@ def reprove(
     )
 
 
-def _legit_via_postgrest(setup: ProveSetup, replay: SupabaseReplay) -> tuple[bool, str]:
+def _speaks_postgrest(setup: ProveSetup) -> bool:
+    """Whether PostgREST is a door this target has. Without the anon key the browser sends,
+    there is none to ask through, and a refusal there says nothing about the owner."""
+    return bool(setup.target.anon_key)
+
+
+def _legit_via_postgrest(
+    setup: ProveSetup, replay: SupabaseReplay
+) -> tuple[Optional[bool], str]:
+    """Whether A still reads its own row via PostgREST: True, False, or None for not asked."""
     if setup.seed is None:
-        return True, "no seed supplied, legitimacy not checked"
+        return None, "no seed supplied, so the owner's access was not checked"
+    if not _speaks_postgrest(setup):
+        return None, (
+            "no anon key, so this is not a PostgREST target and the owner's access there was "
+            "not checked"
+        )
     try:
         replay.authenticate(setup.account_a)
         resp = replay.select_by_id(
@@ -603,8 +628,14 @@ def lockout_check(
         )
 
     # PostgREST, which on the Supabase stack is a door the browser opens directly.
-    ok, detail = _legit_via_postgrest(setup, replay)
-    result.checked.append(
-        LockoutFinding(resource=seed.table, via="postgrest", owner_locked_out=not ok, detail=detail)
-    )
+    via_rest, detail = _legit_via_postgrest(setup, replay)
+    if via_rest is None:
+        # Not a PostgREST target. Asking there anyway would read a 404 as a locked-out owner.
+        result.undecided.append({"resource": seed.table, "reason": detail})
+    else:
+        result.checked.append(
+            LockoutFinding(
+                resource=seed.table, via="postgrest", owner_locked_out=not via_rest, detail=detail
+            )
+        )
     return result

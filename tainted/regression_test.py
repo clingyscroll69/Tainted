@@ -32,8 +32,9 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from urllib.parse import parse_qs, unquote, urlsplit
 
-from tainted.models import Exploit, Finding
+from tainted.models import Exploit, Finding, FindingStatus
 from tainted.repro import NotReproducible, _header_for_artifact
 
 _TOKEN_ENV = "TAINTED_REPLAY_TOKEN"
@@ -126,6 +127,17 @@ def emit_regression_test(
             "This exploit was demonstrated and deliberately never executed, so no observed "
             "request exists to assert against."
         )
+    if finding.status not in _PROOF_ESTABLISHING:
+        raise NotReproducible(
+            f"This finding is {finding.status.value}, not proven. A regression test guards a "
+            f"hole that was seen open; this one never was."
+        )
+    marker = _marker_for(finding, exploit)
+    if marker is None:
+        raise NotReproducible(
+            "No single value in this proof identifies the record that leaked, so a test could "
+            "not tell the hole reopening from the hole staying shut. It would pass either way."
+        )
 
     framework = framework or detect_framework(repo_path)
     if framework is None:
@@ -135,7 +147,6 @@ def emit_regression_test(
             "coverage that does not exist. Pass `framework=` to override."
         )
 
-    marker = _marker_for(finding)
     slug = _slug(finding)
     builder = {
         "pytest": _pytest_source,
@@ -151,23 +162,39 @@ def emit_regression_test(
     return RegressionTest(framework=framework, filename=filename, source=source, marker=marker)
 
 
-def _marker_for(finding: Finding) -> str:
-    """The value whose reappearance means the hole is open again.
+# Statuses that mean an attack ran and the hole was real, as in `report.model` and `exposure`.
+_PROOF_ESTABLISHING = frozenset(
+    {FindingStatus.PROVEN, FindingStatus.FIXED, FindingStatus.BROKE_IT_SAFELY}
+)
 
-    The seed record's id is the right marker: the proof of this class of hole is that the
+
+def _marker_for(finding: Finding, exploit: Exploit) -> Optional[str]:
+    """The value whose reappearance means the hole is open again, or None when there is none.
+
+    The leaked record's id is the right marker: the proof of this class of hole is that the
     attacking account received a record it does not own, and the id is the part of that record
-    that identifies it without copying its contents into a committed file.
+    that identifies it without copying its contents into a committed file. Anything else, a
+    table name or a query string, never appears in a response, so a test asserting its absence
+    would pass whether the hole is open or not.
     """
     meta = finding.candidate.metadata
     for key in ("seed_id", "record_id"):
         if meta.get(key):
             return str(meta[key])
-    proof = finding.proof
-    if proof is not None and proof.exploit and proof.exploit.url:
-        tail = proof.exploit.url.rstrip("/").rsplit("/", 1)[-1]
+    kind = finding.proof.kind if finding.proof else ""
+    url = urlsplit(exploit.url or "")
+    if kind == "targeted_bola":
+        # PostgREST filters on the record it asked for: `?id=eq.42`.
+        for values in parse_qs(url.query).values():
+            for value in values:
+                if value.startswith("eq.") and len(value) > 3:
+                    return value[3:]
+    if kind == "route_bola":
+        # The route was built with the record's id in its last segment: `/api/invoices/42`.
+        tail = unquote(url.path.rstrip("/").rsplit("/", 1)[-1])
         if tail:
             return tail
-    return finding.candidate.id
+    return None
 
 
 def _slug(finding: Finding) -> str:
@@ -192,19 +219,22 @@ Credentials are read from the environment, never stored here:
 
     export {token_env}=<a bearer token for the attacking account>
     export {apikey_env}=<the api key, if the target needs one>
-    export TAINTED_TARGET_URL=<the base URL of the running app>   # optional, defaults below
+    export TAINTED_TARGET_URL=<the base URL of the running app>   # optional; defaults to URL below
 
 The test skips when the target is not reachable. A test that cannot reach the app has not shown
 the attack fails, and turning that into a pass would be the false all-clear this whole check
 exists to prevent.
 """
 import os
+from urllib.parse import urlsplit, urlunsplit
 
 import pytest
 
-requests = pytest.importorskip("urllib.request", reason="stdlib urllib is required")
-
 URL = {url!r}
+if os.environ.get("TAINTED_TARGET_URL"):
+    # Same path and query, aimed at wherever the app runs now.
+    _base = urlsplit(os.environ["TAINTED_TARGET_URL"])
+    URL = urlunsplit((_base.scheme, _base.netloc) + tuple(urlsplit(URL))[2:])
 METHOD = {method!r}
 HEADERS = {headers!r}
 BODY = {body!r}
@@ -258,13 +288,17 @@ _JS = '''\
  *
  *   export {token_env}=<a bearer token for the attacking account>
  *   export {apikey_env}=<the api key, if the target needs one>
+ *   export TAINTED_TARGET_URL=<the base URL of the running app>   # optional
  *
- * The test skips when the target is not reachable: a test that could not reach the app has not
- * shown the attack fails, and recording that as a pass would be a false all-clear.
+ * The test skips when a credential is missing or the target is not reachable: a test that
+ * could not attempt the attack has not shown it fails, and recording that as a pass would be a
+ * false all-clear.{skip_note}
  */
 import {{ describe, it, expect }} from "{importer}";
 
-const URL_ = {url};
+const URL_ = process.env.TAINTED_TARGET_URL
+  ? new URL(new URL({url}).pathname + new URL({url}).search, process.env.TAINTED_TARGET_URL).href
+  : {url};
 const METHOD = {method};
 const HEADERS = {headers};
 const BODY = {body};
@@ -282,14 +316,16 @@ function resolve(value) {{
   return value;
 }}
 
+const headers = {{}};
+let missing = false;
+for (const [k, v] of Object.entries(HEADERS)) {{
+  const resolved = resolve(v);
+  if (resolved === null) missing = true; // a missing credential is not a passed attack
+  else headers[k] = resolved;
+}}
+
 describe("tainted regression", () => {{
-  it("the attack does not succeed", async () => {{
-    const headers = {{}};
-    for (const [k, v] of Object.entries(HEADERS)) {{
-      const resolved = resolve(v);
-      if (resolved === null) return; // a missing credential is not a passed attack
-      headers[k] = resolved;
-    }}
+  (missing ? it.skip : it)("the attack does not succeed", async ({ctx_param}) => {{
 
     let status, body;
     try {{
@@ -301,15 +337,19 @@ describe("tainted regression", () => {{
       status = res.status;
       body = await res.text();
     }} catch (err) {{
-      return; // unreachable target: nothing was attempted, so nothing is asserted
+      // Unreachable target: nothing was attempted, so nothing is asserted.
+      {unreachable}
     }}
 
     const leaked = status >= 200 && status < 300 && body.includes(LEAK_MARKER);
-    expect(
-      leaked,
-      `The attack succeeded again: ${{URL_}} returned ${{status}} carrying ${{LEAK_MARKER}}. ` +
-        `This hole was closed and has reopened.`
-    ).toBe(false);
+    // Thrown rather than passed to `expect`: Jest's `expect` takes one argument, not a message.
+    if (leaked) {{
+      throw new Error(
+        `The attack succeeded again: ${{URL_}} returned ${{status}} carrying ${{LEAK_MARKER}}. ` +
+          `This hole was closed and has reopened.`
+      );
+    }}
+    expect(leaked).toBe(false);
   }});
 }});
 '''
@@ -341,4 +381,18 @@ def _js_source(finding: Finding, exploit: Exploit, marker: str, framework: str) 
         token_env=_TOKEN_ENV,
         apikey_env=_APIKEY_ENV,
         importer="vitest" if framework == "vitest" else "@jest/globals",
+        # Vitest can skip mid-test; Jest cannot, so there an unreachable target returns early
+        # and the header says so, rather than the file claiming a skip it cannot perform.
+        ctx_param="ctx" if framework == "vitest" else "",
+        unreachable=(
+            "ctx.skip();"
+            if framework == "vitest"
+            else 'console.warn(`tainted: ${URL_} unreachable (${err}); attack not attempted`);\n      return;'
+        ),
+        skip_note=(
+            ""
+            if framework == "vitest"
+            else "\n *\n * Jest cannot skip a test once it has started, so an unreachable target is logged\n"
+            " * as a warning and the test returns: read that warning as \"not attempted\", not as a pass."
+        ),
     )

@@ -38,3 +38,45 @@ def test_a_missing_docker_daemon_refuses_rather_than_running_in_process(tmp_path
     ])
     assert result.exit_code == 2
     assert "Docker" in result.output
+
+
+def _proven_report(repo):
+    from tainted.models import (
+        AnalysisResult, Candidate, Check, Exploit, Finding, FindingStatus, ProbeResult,
+        Severity, SourceLocation,
+    )
+    from tainted.report import build_report
+
+    cand = Candidate(check=Check.BOLA, title="invoice leak", severity=Severity.LOW,
+                     location=SourceLocation(file="app.py", line=1))
+    finding = Finding(candidate=cand, status=FindingStatus.PROVEN, proof=ProbeResult(
+        succeeded=True, kind="route_bola",
+        exploit=Exploit(description="x", url="http://localhost:3000/api/invoices/42", executed=True),
+    ))
+    return build_report(AnalysisResult(repo_path=str(repo), candidates=[cand]), [finding])
+
+
+def test_prove_writes_a_receipt_of_the_attacks_that_fired(tmp_path, monkeypatch):
+    """`tainted receipt` fires nothing; the receipt that lists fired attacks comes from prove."""
+    import json
+
+    from tainted.execution.base import ProveOutcome
+
+    report = _proven_report(tmp_path)
+    monkeypatch.setattr(
+        "tainted.execution.docker.DockerExecutor.prove",
+        lambda *a, **k: ProveOutcome(report=report),
+    )
+    out = tmp_path / "receipt.json"
+    result = runner.invoke(app, [
+        "prove", str(tmp_path),
+        "--url", "http://localhost:3000",
+        "--login-a", "a@example.com:pw",
+        "--login-b", "b@example.com:pw",
+        "--receipt", str(out),
+        "--receipt-secret", "k",
+    ])
+    assert result.exit_code == 0, result.output
+    doc = json.loads(out.read_text())
+    assert [r["status"] for r in doc["fired"]] == ["proven"]
+    assert "signature" in doc

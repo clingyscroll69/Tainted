@@ -148,3 +148,20 @@ def test_reprove_a_held_write_is_not_called_fixed():
     r = _reprove(_route_finding("DELETE"), handler)
     assert r.status is FindingStatus.REPORTED and r.attack_blocked is False
     assert sent == []
+
+
+def test_reprove_without_an_owner_check_is_not_reproduced_never_fixed():
+    """SQL injection that now holds, on an app with no PostgREST: half the verdict is unasked."""
+    c = Candidate(check=Check.CLASSIC_INJECTION, title="sqli", severity=Severity.HIGH,
+                  location=SourceLocation(file="app.py", line=1),
+                  metadata={"route_path": "/api/items", "method": "GET", "kind": "sql"})
+    s = ProveSetup(
+        target=Target(url="http://localhost:3000"),
+        account_a=Account(label="A", access_token="tok-a"),
+        account_b=Account(label="B", access_token="tok-b"),
+        seed=SeedRecord(table="items", id="42"),
+    )
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=[])))
+    r = reprove(Finding(candidate=c, status=FindingStatus.PROVEN), s,
+                prober=RouteProber(s, client=client), replay=SupabaseReplay(s.target, client))
+    assert r.status is FindingStatus.NOT_REPRODUCED and r.legitimate_access_ok is None
