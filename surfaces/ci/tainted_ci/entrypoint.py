@@ -161,6 +161,9 @@ def run() -> int:
     findings = []
 
     prove_note = "prove skipped: no TAINTED_TARGET_URL"
+    # Every request this job sends to the target is gated on this, not only prove's: the
+    # invariant and lockout checks below fire at the same app.
+    verified = False
     if setup is not None:
         verified = setup.target.is_local
         detail = "local target"
@@ -231,7 +234,7 @@ def run() -> int:
         rules = [r.strip() for r in rules_raw.replace("|", chr(10)).split(chr(10)) if r.strip()]
         if rules:
             invariant_report = check_invariants(
-                rules, repo, setup, llm=llm, ownership_verified=True
+                rules, repo, setup, llm=llm, ownership_verified=verified
             )
 
     # Did this change lock the owner out of their own data? Asked only when a seed record makes
@@ -240,7 +243,7 @@ def run() -> int:
     if os.environ.get("TAINTED_LOCKOUT", "").lower() in ("1", "true", "yes") and setup is not None:
         from tainted import lockout_check
 
-        lockout_result = lockout_check(setup, ownership_verified=True)
+        lockout_result = lockout_check(setup, ownership_verified=verified)
 
     markdown = render_markdown(report, prove_note)
     if invariant_report is not None:

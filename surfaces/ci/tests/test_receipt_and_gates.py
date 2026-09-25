@@ -164,3 +164,34 @@ def test_the_rendered_rules_block_keeps_not_tested_separate():
         )
     )
     assert "not_tested" in md and "is not a rule that held" in md
+
+
+def test_rules_and_lockout_inherit_prove_s_ownership_refusal(monkeypatch):
+    """A remote target whose ownership failed is not fired at by any check, not only by prove."""
+    _clear_env(monkeypatch)
+    monkeypatch.setenv("TAINTED_REPO", REPO)
+    monkeypatch.setenv("TAINTED_TARGET_URL", "https://someone-elses-app.example")
+    monkeypatch.setenv("TAINTED_INVARIANTS", "No user sees another user's email")
+    monkeypatch.setenv("TAINTED_LOCKOUT", "true")
+
+    class Refused:
+        detail = "no OIDC token"
+
+        def __bool__(self):
+            return False
+
+    seen = {}
+
+    def invariants(*a, **k):
+        seen["invariants"] = k["ownership_verified"]
+        return InvariantReport(results=[])
+
+    def lockout(*a, **k):
+        seen["lockout"] = k["ownership_verified"]
+        return LockoutResult()
+
+    monkeypatch.setattr(ep, "verify_ci_ownership", lambda: Refused())
+    monkeypatch.setattr("tainted.invariants.check_invariants", invariants)
+    monkeypatch.setattr("tainted.lockout_check", lockout)
+    ep.run()
+    assert seen == {"invariants": False, "lockout": False}
